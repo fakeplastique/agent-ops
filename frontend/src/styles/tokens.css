@@ -31,7 +31,11 @@
   --space-3: 12px;
   --space-4: 16px;
   --space-6: 24px;
+  --space-half: 2px;
   --control-height: 32px;
+  --row-height: 48px;
+  --measure: 480px;
+  --focus-width: 2px;
   --sheet-inset: 8px;
   --radius-sheet: 16px;
   --radius-card: 8px;

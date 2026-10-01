@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 type Checks = { postgres: boolean; redis: boolean };
 type State =
@@ -25,32 +25,40 @@ async function readApi(): Promise<State> {
 
 export default function Page() {
   const [state, setState] = useState<State>({ kind: "loading" });
-  const [attempt, setAttempt] = useState(0);
-  const [busy, setBusy] = useState(false); // retry in flight; keeps the button mounted so focus stays
+  const [busy, setBusy] = useState(true); // a read is in flight; the button stays mounted so focus stays
+  const status = useRef<HTMLDivElement>(null);
+  const retried = useRef(false);
+
+  const refresh = useCallback(
+    () =>
+      readApi().then((next) => {
+        setState(next);
+        setBusy(false);
+      }),
+    [],
+  );
 
   useEffect(() => {
-    let live = true;
-    readApi().then((next) => {
-      if (!live) return;
-      setState(next);
-      setBusy(false);
-    });
-    return () => {
-      live = false;
-    };
-  }, [attempt]);
+    void refresh();
+  }, [refresh]);
+
+  // The Retry button unmounts once the read succeeds; hand focus to the status region.
+  useEffect(() => {
+    if (retried.current && !busy && document.activeElement === document.body) status.current?.focus();
+  }, [state, busy]);
 
   const retry = () => {
     if (busy) return;
+    retried.current = true;
     setBusy(true);
-    setAttempt((n) => n + 1);
+    void refresh();
   };
 
   return (
     <main className="frame">
       <div className="sheet">
         <h1>Agent Ops</h1>
-        <div role="status">
+        <div role="status" ref={status} tabIndex={-1}>
           {state.kind === "loading" && <p className="muted">Checking the API…</p>}
           {state.kind === "error" && (
             <>

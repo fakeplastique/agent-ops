@@ -15,7 +15,7 @@ export default defineConfig([
         },
         {
           selector:
-            "Property[key.name='fontSize'] > Literal[value=/px$/], Literal[value=/font-size:\\s*[0-9.]+px|text-\\[[0-9.]+px\\]/], TemplateElement[value.raw=/font-size:\\s*[0-9.]+px|text-\\[[0-9.]+px\\]/]",
+            "Property[key.name='fontSize'] > Literal[raw=/^[^0-9.]?[0-9.]+(px)?[^0-9.]?$/], Literal[value=/font-size:\\s*[0-9.]+px|text-\\[[0-9.]+px\\]/], TemplateElement[value.raw=/font-size:\\s*[0-9.]+px|text-\\[[0-9.]+px\\]/]",
           message: "Use a type-scale token from tokens.css, not a px font size.",
         },
       ],

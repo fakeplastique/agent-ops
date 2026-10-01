@@ -62,4 +62,16 @@ describe("health page", () => {
     await userEvent.click(busy);
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
+
+  // The Retry button unmounts on success; focus must land on the status region, not <body>.
+  it("moves focus to the status region when a retry succeeds", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockRejectedValueOnce(new TypeError("failed")).mockImplementationOnce(() => reply(ready, 200)),
+    );
+    render(<Page />);
+    await userEvent.click(await screen.findByRole("button", { name: "Retry" }));
+    await screen.findByText("API ready");
+    expect(screen.getByRole("status")).toHaveFocus();
+  });
 });

@@ -32,7 +32,7 @@ else
   api=$!
   trap 'kill $api 2>/dev/null' EXIT
 fi
-step "api up" curl -sf --retry 30 --retry-delay 1 --retry-all-errors localhost:8000/healthz
+step "api up" curl -sf -o /dev/null --retry 30 --retry-delay 1 --retry-all-errors localhost:8000/healthz
 
 step "api collection" npx --yes newman run backend/postman/collection.json
 step "frontend e2e" pnpm --dir frontend exec playwright test
