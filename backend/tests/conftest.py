@@ -18,7 +18,7 @@ TEST_DB = "agent_ops_test"
 
 def _urls() -> tuple[URL, URL]:
     # Owner = the compose superuser (migrations); app = the non-owner runtime role.
-    owner = make_url(settings.database_url).set(database=TEST_DB)
+    owner = make_url(settings.migrate_database_url).set(database=TEST_DB)
     return owner, owner.set(username="app_rt", password="app_rt")
 
 

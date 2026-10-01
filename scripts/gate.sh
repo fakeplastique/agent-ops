@@ -15,6 +15,7 @@ step "backend format" uv run --project backend ruff format --check backend
 step "backend lint" uv run --project backend ruff check backend
 step "backend typecheck" uv run --project backend pyright --project backend/pyproject.toml
 step "services up" docker compose up -d --wait postgres redis
+step "migrate dev db" env MIGRATE_DATABASE_URL=postgresql://app:app@localhost:5432/agent_ops scripts/migrate.sh
 step "backend tests" uv run --project backend pytest backend/tests
 
 step "frontend install" pnpm --dir frontend install --frozen-lockfile
