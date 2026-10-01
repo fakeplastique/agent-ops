@@ -10,7 +10,7 @@ images() {
   local rc=0 prod="docker compose --profile prod"
   $prod build && $prod up -d --wait api web || rc=1
   for s in api web; do
-    [ "$($prod exec -T $s id -u 2>/dev/null)" -gt 0 ] 2>/dev/null || { echo "$s is not running as non-root"; rc=1; }
+    [ "$($prod exec -T $s id -u 2>/dev/null)" != 0 ] || { echo "$s runs as root"; rc=1; }
   done
   ((rc == 0)) || $prod logs --tail 30
   $prod rm -sf api web >/dev/null
