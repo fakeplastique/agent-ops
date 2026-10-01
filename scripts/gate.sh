@@ -14,6 +14,7 @@ step() { # step <name> <cmd>...
 step "backend format" uv run --project backend ruff format --check backend
 step "backend lint" uv run --project backend ruff check backend
 step "backend typecheck" uv run --project backend pyright --project backend/pyproject.toml
+step "services up" docker compose up -d --wait postgres redis
 step "backend tests" uv run --project backend pytest backend/tests
 
 if ((${#failed[@]})); then
