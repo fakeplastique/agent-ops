@@ -20,7 +20,7 @@ export default defineConfig({
     {
       command: "pnpm build && pnpm start -p 3100",
       url: WEB,
-      reuseExistingServer: true,
+      reuseExistingServer: false, // a stale web server would hide a broken build
       timeout: 180_000,
     },
   ],

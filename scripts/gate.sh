@@ -23,14 +23,16 @@ step "frontend typecheck" pnpm --dir frontend typecheck
 step "frontend tests" pnpm --dir frontend test
 
 # One API instance shared by newman and Playwright (it reuses a server on :8000).
-uv run --project backend uvicorn app.main:app --app-dir backend --port 8000 --log-level warning &
-api=$!
-trap 'kill $api 2>/dev/null' EXIT
-for _ in $(seq 60); do
-  kill -0 $api 2>/dev/null || break
-  curl -sf localhost:8000/healthz >/dev/null && break
-  sleep 0.5
-done
+# A server already answering there would be tested instead of our code: fail, never reuse.
+if curl -sf localhost:8000/healthz >/dev/null; then
+  echo "FAIL api port: something already answers on :8000"
+  failed+=("api port")
+else
+  uv run --project backend uvicorn app.main:app --app-dir backend --port 8000 --log-level warning &
+  api=$!
+  trap 'kill $api 2>/dev/null' EXIT
+fi
+step "api up" curl -sf --retry 30 --retry-delay 1 --retry-all-errors localhost:8000/healthz
 
 step "api collection" npx --yes newman run backend/postman/collection.json
 step "frontend e2e" pnpm --dir frontend exec playwright test

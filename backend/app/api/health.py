@@ -17,26 +17,30 @@ async def healthz() -> dict[str, str]:
 
 
 async def _postgres() -> bool:
-    engine = create_async_engine(settings.database_url)
+    engine = None
     try:
+        engine = create_async_engine(settings.database_url)
         async with asyncio.timeout(TIMEOUT), engine.connect() as conn:
             await conn.execute(text("select 1"))
         return True
     except Exception:  # noqa: BLE001 - any failure means not ready
         return False
     finally:
-        await engine.dispose()
+        if engine:
+            await engine.dispose()
 
 
 async def _redis() -> bool:
-    client = Redis.from_url(settings.redis_url)
+    client = None
     try:
+        client = Redis.from_url(settings.redis_url)
         async with asyncio.timeout(TIMEOUT):
             return bool(await client.ping())
     except Exception:  # noqa: BLE001 - any failure means not ready
         return False
     finally:
-        await client.aclose()
+        if client:
+            await client.aclose()
 
 
 @router.get("/readyz")
