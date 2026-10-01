@@ -1,5 +1,5 @@
 {
-  "name": "agent-ops-web",
+  "name": "agent-ops-frontend",
   "private": true,
   "type": "module",
   "scripts": {

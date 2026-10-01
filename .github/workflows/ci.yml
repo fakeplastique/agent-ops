@@ -12,18 +12,18 @@ jobs:
       - uses: astral-sh/setup-uv@v5
       - uses: pnpm/action-setup@v4
         with:
-          package_json_file: web/package.json
+          package_json_file: frontend/package.json
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
-          cache-dependency-path: web/pnpm-lock.yaml
+          cache-dependency-path: frontend/pnpm-lock.yaml
       - run: uv sync --project backend
-      - run: pnpm --dir web install --frozen-lockfile
-      - run: pnpm --dir web exec playwright install --with-deps chromium
+      - run: pnpm --dir frontend install --frozen-lockfile
+      - run: pnpm --dir frontend exec playwright install --with-deps chromium
       - run: ./scripts/gate.sh
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: playwright-screenshots
-          path: web/test-results
+          path: frontend/test-results

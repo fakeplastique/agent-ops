@@ -17,10 +17,10 @@ step "backend typecheck" uv run --project backend pyright --project backend/pypr
 step "services up" docker compose up -d --wait postgres redis
 step "backend tests" uv run --project backend pytest backend/tests
 
-step "web install" pnpm --dir web install --frozen-lockfile
-step "web lint" pnpm --dir web lint
-step "web typecheck" pnpm --dir web typecheck
-step "web tests" pnpm --dir web test
+step "frontend install" pnpm --dir frontend install --frozen-lockfile
+step "frontend lint" pnpm --dir frontend lint
+step "frontend typecheck" pnpm --dir frontend typecheck
+step "frontend tests" pnpm --dir frontend test
 
 # One API instance shared by newman and Playwright (it reuses a server on :8000).
 uv run --project backend uvicorn app.main:app --app-dir backend --port 8000 --log-level warning &
@@ -33,7 +33,7 @@ for _ in $(seq 60); do
 done
 
 step "api collection" npx --yes newman run backend/postman/collection.json
-step "web e2e" pnpm --dir web exec playwright test
+step "frontend e2e" pnpm --dir frontend exec playwright test
 
 if ((${#failed[@]})); then
   echo "GATE FAILED: ${failed[*]}"
