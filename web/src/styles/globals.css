@@ -1,0 +1,114 @@
+@import "./tokens.css";
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--text);
+  font: 400 var(--text-body) / 1.5 var(--font-sans);
+}
+
+::selection {
+  background: var(--active);
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.frame {
+  min-height: 100dvh;
+  padding: var(--sheet-inset);
+}
+
+.sheet {
+  min-height: calc(100dvh - 2 * var(--sheet-inset));
+  padding: var(--space-6);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sheet);
+}
+
+.sheet > * {
+  max-width: 480px;
+}
+
+h1 {
+  margin: 0 0 var(--space-6);
+  font-size: var(--text-title);
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+h2 {
+  margin: 0 0 var(--space-1);
+  font-size: var(--text-section);
+  font-weight: 500;
+  line-height: 1.2;
+}
+
+.muted {
+  margin: 0;
+  color: var(--muted);
+}
+
+.checks {
+  margin: var(--space-4) 0 0;
+  padding: 0;
+}
+
+.checks > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 48px;
+  border-top: 1px solid var(--rule);
+}
+
+.checks dt {
+  margin: 0;
+}
+
+.checks dd {
+  margin: 0;
+}
+
+.pill {
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-pill);
+  font-size: var(--text-small);
+  font-weight: 500;
+  background: var(--pill-neutral-bg);
+  color: var(--pill-neutral-ink);
+}
+
+.pill[data-ok="true"] {
+  background: var(--pill-positive-bg);
+  color: var(--pill-positive-ink);
+}
+
+.pill[data-ok="false"] {
+  background: var(--pill-negative-bg);
+  color: var(--pill-negative-ink);
+}
+
+button {
+  height: var(--control-height);
+  margin-top: var(--space-4);
+  padding: 0 var(--space-4);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: var(--text);
+  color: var(--surface);
+  font: 500 var(--text-body) / 1 var(--font-sans);
+  cursor: pointer;
+  transition: opacity var(--press);
+}
+
+button:hover {
+  opacity: 0.85;
+}

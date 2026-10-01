@@ -1,0 +1,47 @@
+/* Source of truth: DESIGN.md. Components use these variables only. */
+:root {
+  --ground: #eef2f5;
+  --surface: #ffffff;
+  --raised: #f4f6f8;
+  --active: #e6eaed;
+  --border: #e4e7ea;
+  --rule: #eff1f3;
+  --control: #c9cdd1;
+  --text: #131416;
+  --muted: #5b5e62;
+  --accent: #1b6c80;
+  --positive: #1e7b4f;
+  --negative: #c4242a;
+  --warning: #92400e;
+  --pill-positive-bg: #dcfae5;
+  --pill-positive-ink: #04250e;
+  --pill-negative-bg: #ffedea;
+  --pill-negative-ink: #831c1e;
+  --pill-neutral-bg: #e6eaed;
+  --pill-neutral-ink: #353736;
+
+  --font-sans: "IBM Plex Sans", system-ui, sans-serif;
+  --text-title: 22px;
+  --text-section: 16px;
+  --text-body: 14px;
+  --text-small: 12px;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --control-height: 32px;
+  --sheet-inset: 8px;
+  --radius-sheet: 16px;
+  --radius-card: 8px;
+  --radius-control: 6px;
+  --radius-pill: 9999px;
+  --press: 120ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --press: 0ms;
+  }
+}
