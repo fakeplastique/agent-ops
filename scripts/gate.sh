@@ -4,6 +4,19 @@ set -uo pipefail
 cd "$(dirname "$0")/.."
 
 failed=()
+
+# Production images build, run as non-root and pass their healthchecks (compose prod profile).
+images() {
+  local rc=0 prod="docker compose --profile prod"
+  $prod build && $prod up -d --wait api web || rc=1
+  for s in api web; do
+    [ "$($prod exec -T $s id -u 2>/dev/null)" -gt 0 ] 2>/dev/null || { echo "$s is not running as non-root"; rc=1; }
+  done
+  ((rc == 0)) || $prod logs --tail 30
+  $prod rm -sf api web >/dev/null
+  return $rc
+}
+
 step() { # step <name> <cmd>...
   local name=$1; shift
   echo "::group::$name"
@@ -18,6 +31,7 @@ step "services up" docker compose up -d --wait postgres redis
 step "migrate dev db" env MIGRATE_DATABASE_URL=postgresql://app:app@localhost:5432/agent_ops scripts/migrate.sh
 step "backend tests" uv run --project backend pytest backend/tests
 
+step "images" images
 step "frontend install" pnpm --dir frontend install --frozen-lockfile
 step "frontend lint" pnpm --dir frontend lint
 step "frontend typecheck" pnpm --dir frontend typecheck
