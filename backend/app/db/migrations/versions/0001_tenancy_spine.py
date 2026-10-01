@@ -13,14 +13,14 @@ GEN_ID = sa.text("gen_random_uuid()")
 NOW = sa.text("now()")
 
 
-def _tenant_rls(table: str) -> None:
+def _tenant_rls(table: str, grants: str = "SELECT, INSERT, UPDATE, DELETE") -> None:
     op.execute(f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY")
     op.execute(f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY")
     op.execute(
         f"CREATE POLICY tenant_isolation ON {table}"
         f" USING (organization_id = {ORG}) WITH CHECK (organization_id = {ORG})"
     )
-    op.execute(f"GRANT SELECT, INSERT, UPDATE, DELETE ON {table} TO app_rt")
+    op.execute(f"GRANT {grants} ON {table} TO app_rt")
 
 
 def upgrade() -> None:
@@ -53,10 +53,21 @@ def upgrade() -> None:
         sa.Column("published_at", sa.DateTime(timezone=True)),
         sa.UniqueConstraint("organization_id", "seq"),
     )
-    for table in ("audit_logs", "org_event_counters", "outbox_events"):
-        _tenant_rls(table)
+    _tenant_rls("audit_logs", "SELECT, INSERT")
+    _tenant_rls("org_event_counters")
+    _tenant_rls("outbox_events")
+    # Grants stop the app role; the trigger also stops the owner and superusers.
+    op.execute(
+        "CREATE FUNCTION audit_logs_append_only() RETURNS trigger LANGUAGE plpgsql AS $$"
+        " BEGIN RAISE EXCEPTION 'audit_logs is append-only'; END $$"
+    )
+    op.execute(
+        "CREATE TRIGGER audit_logs_append_only BEFORE UPDATE OR DELETE ON audit_logs"
+        " FOR EACH ROW EXECUTE FUNCTION audit_logs_append_only()"
+    )
 
 
 def downgrade() -> None:
     for table in ("outbox_events", "org_event_counters", "audit_logs"):
         op.drop_table(table)
+    op.execute("DROP FUNCTION audit_logs_append_only()")
