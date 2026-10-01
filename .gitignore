@@ -1,0 +1,17 @@
+node_modules/
+
+# Agent files (local only)
+.agent/
+.agents/
+.claude/
+CLAUDE.md
+AGENTS.md
+WORKFLOW.md
+PRODUCT.md
+skills-lock.json
+
+# Planning and bootstrap material (local only)
+.ai/
+docs/
+DESIGN.md
+scripts/bootstrap.sh
