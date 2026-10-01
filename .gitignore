@@ -15,3 +15,10 @@ skills-lock.json
 docs/
 DESIGN.md
 scripts/bootstrap.sh
+
+# Build output and secrets
+__pycache__/
+.next/
+.env
+test-results/
+playwright-report/
