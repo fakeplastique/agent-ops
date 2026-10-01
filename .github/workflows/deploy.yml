@@ -1,0 +1,31 @@
+name: deploy
+# Runs only after the ci gate passed on a push to main; PRs and branches never reach it.
+on:
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+    branches: [main]
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'
+    runs-on: ubuntu-latest
+    env:
+      RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }} # project token, scoped to one environment
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }} # the commit that passed, not whatever main is now
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --project backend --no-dev
+      - name: Migrate as the owner role, before any new build serves traffic
+        run: scripts/migrate.sh
+        env:
+          MIGRATE_DATABASE_URL: ${{ secrets.MIGRATE_DATABASE_URL }}
+      - run: npm i -g @railway/cli
+      - run: railway up backend --service api --ci
+      - run: railway up frontend --service web --ci
