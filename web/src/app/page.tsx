@@ -26,17 +26,23 @@ async function readApi(): Promise<State> {
 export default function Page() {
   const [state, setState] = useState<State>({ kind: "loading" });
   const [attempt, setAttempt] = useState(0);
+  const [busy, setBusy] = useState(false); // retry in flight; keeps the button mounted so focus stays
 
   useEffect(() => {
     let live = true;
-    readApi().then((next) => live && setState(next));
+    readApi().then((next) => {
+      if (!live) return;
+      setState(next);
+      setBusy(false);
+    });
     return () => {
       live = false;
     };
   }, [attempt]);
 
   const retry = () => {
-    setState({ kind: "loading" });
+    if (busy) return;
+    setBusy(true);
     setAttempt((n) => n + 1);
   };
 
@@ -71,8 +77,8 @@ export default function Page() {
           )}
         </div>
         {(state.kind === "error" || state.kind === "unavailable") && (
-          <button type="button" onClick={retry}>
-            Retry
+          <button type="button" aria-disabled={busy} onClick={retry}>
+            {busy ? "Retrying…" : "Retry"}
           </button>
         )}
       </div>

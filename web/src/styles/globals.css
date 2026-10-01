@@ -112,3 +112,8 @@ button {
 button:hover {
   opacity: 0.85;
 }
+
+button[aria-disabled="true"] {
+  opacity: 0.6;
+  cursor: default;
+}

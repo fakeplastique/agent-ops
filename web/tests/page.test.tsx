@@ -45,4 +45,21 @@ describe("health page", () => {
     await userEvent.click(screen.getByRole("button", { name: "Retry" }));
     expect(await screen.findByText("API ready")).toBeInTheDocument();
   });
+
+  // Retry unmounting would drop keyboard focus to <body>.
+  it("keeps focus on the Retry button while retrying, and ignores a second click", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockRejectedValueOnce(new TypeError("failed"))
+      .mockImplementationOnce(() => new Promise(() => {}));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<Page />);
+    const retry = await screen.findByRole("button", { name: "Retry" });
+    retry.focus();
+    await userEvent.click(retry);
+    const busy = screen.getByRole("button", { name: "Retrying…" });
+    expect(busy).toHaveFocus();
+    await userEvent.click(busy);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
 });
