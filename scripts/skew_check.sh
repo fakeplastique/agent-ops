@@ -49,4 +49,11 @@ PY
 if migrate "$tmp/broken"; then echo "FAIL: broken migration succeeded"; exit 1; fi
 [ "$(version)" = "$head" ] || { echo "FAIL: version moved to $(version)"; exit 1; }
 [ -z "$(psql -d $DB -c "select to_regclass('skew_half')")" ] || { echo "FAIL: partial table left"; exit 1; }
+
+echo "== APP_RT_PASSWORD replaces the dev password (restored afterwards: the role is cluster-wide)"
+APP_RT_PASSWORD=probe-pw migrate backend
+login() { PGPASSWORD=$1 command psql -h localhost -U app_rt -d $DB -tAc "select 1" 2>/dev/null || true; }
+new=$(login probe-pw) old=$(login app_rt)
+APP_RT_PASSWORD=app_rt migrate backend
+[ "$new" = 1 ] && [ -z "$old" ] || { echo "FAIL: dev password still works or new one rejected"; exit 1; }
 echo "SKEW OK"
