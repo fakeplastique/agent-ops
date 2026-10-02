@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Create the app role, then migrate to head as the owner (MIGRATE_DATABASE_URL); one transaction, all or nothing.
+# APP_RT_PASSWORD (optional) replaces the dev password. Create the app role, then migrate to head as the owner (MIGRATE_DATABASE_URL); one transaction, all or nothing.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 : "${MIGRATE_DATABASE_URL:?set MIGRATE_DATABASE_URL to the owner role}"
@@ -10,6 +10,7 @@ import asyncio, os, sys
 from pathlib import Path
 
 sys.path.insert(0, os.environ["BACKEND_DIR"])  # lets skew_check migrate with an older tree
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.db.migrate import upgrade
@@ -22,6 +23,9 @@ async def main() -> None:
     engine = create_async_engine(url)
     async with engine.begin() as c:
         await c.exec_driver_sql(roles)
+        if pw := os.environ.get("APP_RT_PASSWORD"):  # the file's dev password must not survive in prod
+            stmt = (await c.execute(text("select format('alter role app_rt password %L', cast(:pw as text))"), {"pw": pw})).scalar_one()
+            await c.exec_driver_sql(stmt)
         await c.run_sync(upgrade)
     await engine.dispose()
 
