@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# APP_RT_PASSWORD (optional) replaces the dev password. Create the app role, then migrate to head as the owner (MIGRATE_DATABASE_URL); one transaction, all or nothing.
+# APP_RT_PASSWORD (required when RAILWAY_ENVIRONMENT is set) replaces the dev password. Create the app role, then migrate to head as the owner (MIGRATE_DATABASE_URL); one transaction, all or nothing.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 : "${MIGRATE_DATABASE_URL:?set MIGRATE_DATABASE_URL to the owner role}"
+# Hosted: the dev password in db_roles.sql must never be what production runs with.
+[[ -z "${RAILWAY_ENVIRONMENT:-}" || -n "${APP_RT_PASSWORD:-}" ]] || { echo "APP_RT_PASSWORD is required on Railway" >&2; exit 1; }
 export BACKEND_DIR=${BACKEND_DIR:-backend}
 
 # The api image sets MIGRATE_PYTHON=python (no uv project there).
