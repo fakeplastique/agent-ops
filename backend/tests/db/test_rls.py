@@ -3,7 +3,7 @@ import uuid
 import pytest
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
-from sqlalchemy.ext.asyncio import AsyncEngine
+from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from app.db.session import tenant_session
 
@@ -88,3 +88,18 @@ async def test_force_rls_on_every_tenant_table(owner_engine: AsyncEngine):
         ).all()
     assert {r[0] for r in rows} >= TENANT_TABLES  # guards against a vacuous pass
     assert [r[0] for r in rows if not all(r[1:])] == []
+
+
+async def test_tenant_setting_does_not_outlive_its_transaction_on_a_pooled_connection(
+    app_engine: AsyncEngine, owner_engine: AsyncEngine, org_a: uuid.UUID
+):
+    # Catches set_config(..., false): the org would stay on the pooled connection for the next caller.
+    await _seed_audit(owner_engine, org_a)
+    pooled = create_async_engine(app_engine.url, pool_size=1, max_overflow=0)
+    try:
+        async with tenant_session(pooled, org_a) as s:
+            assert await s.scalar(text("select count(*) from audit_logs")) == 1
+        async with pooled.connect() as c:  # the same physical connection, no tenant set
+            assert await c.scalar(text("select count(*) from audit_logs")) == 0
+    finally:
+        await pooled.dispose()
