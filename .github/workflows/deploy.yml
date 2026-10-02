@@ -22,7 +22,8 @@ jobs:
         with:
           ref: ${{ github.event.workflow_run.head_sha }} # the commit that passed, not whatever main is now
       - run: npm i -g @railway/cli
-      # api first: its pre-deploy migration must finish (additive schema) before web rolls out.
+      # api first. `railway up --ci` returns after the build, not after the pre-deploy migration, so web may
+      # roll out on the old schema: safe only because migrations are additive (expand then contract, D9).
       - run: railway up --service api --ci # repo root: backend/Dockerfile needs scripts/
       - run: railway up --service web --ci
         working-directory: frontend # `railway up <path>` fails with "prefix not found"; cwd is the upload root
