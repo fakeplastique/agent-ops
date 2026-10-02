@@ -16,5 +16,9 @@ class UserPrincipal:
     organization_id: UUID
     role: Role
 
+    def __post_init__(self) -> None:
+        # A raw int from a DB column must become a Role (or raise), never skip an `is` check.
+        object.__setattr__(self, "role", Role(self.role))
+
 
 Principal = AgentPrincipal | UserPrincipal

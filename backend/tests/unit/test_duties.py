@@ -3,6 +3,8 @@ from contextlib import contextmanager
 from dataclasses import replace
 from uuid import uuid4
 
+import pytest
+
 from app.authz.duties import StepFacts, may_decide
 from app.authz.matrix import Role
 from app.authz.principals import AgentPrincipal, UserPrincipal
@@ -106,3 +108,15 @@ def test_role_below_required_denied_and_org_wide_roles_need_no_team():
 
 def test_step_with_no_decide_action_is_denied_not_a_crash():
     assert not may_decide(user(Role.ORG_ADMIN), step(Role.MEMBER), frozenset())
+
+
+def test_raw_int_role_still_gets_team_scope_and_member_steps_deny():
+    # An `is` check let a raw int role skip the team-scope branch (r2 F1/F2).
+    not_leader = UserPrincipal(uuid4(), ORG, 2)  # type: ignore[arg-type]
+    assert not may_decide(not_leader, step(Role.TEAM_LEAD), frozenset())
+    assert not may_decide(user(Role.ORG_ADMIN), step(1), frozenset())  # type: ignore[arg-type]
+
+
+def test_out_of_range_role_is_rejected():
+    with pytest.raises(ValueError):
+        UserPrincipal(uuid4(), ORG, 9)  # type: ignore[arg-type]

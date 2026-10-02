@@ -16,6 +16,9 @@ class StepFacts:
     team_parents: Mapping[UUID, UUID | None]
     prior_decider_ids: frozenset[UUID]  # users who decided a step of this request version
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "required_role", Role(self.required_role))
+
 
 def leads_team_or_ancestor(
     team_id: UUID | None, led: frozenset[UUID], parents: Mapping[UUID, UUID | None]
