@@ -32,6 +32,7 @@ step "migrate dev db" env MIGRATE_DATABASE_URL=postgresql://app:app@localhost:54
 step "backend tests" uv run --project backend pytest backend/tests
 
 step "images" images
+step "version skew" "${SKEW_CHECK:-scripts/skew_check.sh}"
 step "frontend install" pnpm --dir frontend install --frozen-lockfile
 step "frontend lint" pnpm --dir frontend lint
 step "frontend typecheck" pnpm --dir frontend typecheck
