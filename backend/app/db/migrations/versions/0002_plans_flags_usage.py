@@ -78,7 +78,9 @@ def upgrade() -> None:
         sa.Column("id", UUID, primary_key=True),
         sa.Column("name", sa.Text, nullable=False),
         sa.Column("slug", sa.Text, nullable=False, unique=True),
-        sa.Column("plan_key", sa.Text, sa.ForeignKey("plans.key"), nullable=False),
+        sa.Column(
+            "plan_key", sa.Text, sa.ForeignKey("plans.key"), nullable=False, server_default="free"
+        ),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=NOW),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=NOW),
     )
@@ -98,7 +100,10 @@ def upgrade() -> None:
     # The tenant root is its own tenant: a new org is inserted under its own id as the setting.
     # Grants are the second wall for what a tenant may never do to itself (S5-D2):
     # no plan_key change (S25 adds a guarded path), no override writes, counters only go up.
-    _rls("organizations", "id", "SELECT, INSERT")
+    _rls("organizations", "id", "SELECT")
+    op.execute(
+        "GRANT INSERT (id, name, slug) ON organizations TO app_rt"
+    )  # plan_key defaults to free
     op.execute("GRANT UPDATE (name, slug, updated_at) ON organizations TO app_rt")
     _rls("organization_feature_overrides", "organization_id", "SELECT")
     _rls("usage_counters", "organization_id", "SELECT, INSERT")

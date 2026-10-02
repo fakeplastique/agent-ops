@@ -1,3 +1,5 @@
+import uuid
+
 import pytest
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
@@ -53,3 +55,18 @@ async def test_usage_counter_can_only_go_up(app_engine, owner_engine):
     assert await _refused(
         app_engine, org, "delete from usage_counters where organization_id=:o", o=org
     )
+
+
+async def test_new_organization_starts_free_and_cannot_pick_its_plan(app_engine):
+    org = uuid.uuid4()
+    pick = "insert into organizations (id, name, slug, plan_key) values (:o, 'n', :s, 'enterprise')"
+    assert await _refused(
+        app_engine, org, pick, o=org, s=f"a-{org}"
+    )  # catches: self-served Enterprise
+    plain = "insert into organizations (id, name, slug) values (:o, 'n', :s)"
+    assert not await _refused(app_engine, org, plain, o=org, s=f"b-{org}")
+    async with tenant_session(app_engine, org) as s:
+        assert (
+            await s.scalar(text("select plan_key from organizations where id=:o"), {"o": org})
+            == "free"
+        )
