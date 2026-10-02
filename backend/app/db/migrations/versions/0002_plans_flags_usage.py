@@ -96,14 +96,29 @@ def upgrade() -> None:
         sa.Column("value", sa.Integer, nullable=False),
     )
     # The tenant root is its own tenant: a new org is inserted under its own id as the setting.
-    _rls("organizations", "id", "SELECT, INSERT, UPDATE")
-    _rls("organization_feature_overrides", "organization_id", "SELECT, INSERT, UPDATE, DELETE")
-    _rls("usage_counters", "organization_id", "SELECT, INSERT, UPDATE")
+    # Grants are the second wall for what a tenant may never do to itself (S5-D2):
+    # no plan_key change (S25 adds a guarded path), no override writes, counters only go up.
+    _rls("organizations", "id", "SELECT, INSERT")
+    op.execute("GRANT UPDATE (name, slug, updated_at) ON organizations TO app_rt")
+    _rls("organization_feature_overrides", "organization_id", "SELECT")
+    _rls("usage_counters", "organization_id", "SELECT, INSERT")
+    op.execute("GRANT UPDATE (value) ON usage_counters TO app_rt")
+    op.create_check_constraint("usage_value_nonneg", "usage_counters", "value >= 0")
+    op.execute(
+        "CREATE FUNCTION usage_only_up() RETURNS trigger LANGUAGE plpgsql AS $$"
+        " BEGIN IF NEW.value < OLD.value THEN RAISE EXCEPTION 'usage counters only go up'; END IF;"
+        " RETURN NEW; END $$"
+    )
+    op.execute(
+        "CREATE TRIGGER usage_only_up BEFORE UPDATE ON usage_counters"
+        " FOR EACH ROW EXECUTE FUNCTION usage_only_up()"
+    )
 
 
 def downgrade() -> None:
+    op.drop_table("usage_counters")
+    op.execute("DROP FUNCTION usage_only_up()")
     for table in (
-        "usage_counters",
         "organization_feature_overrides",
         "organizations",
         "plan_features",

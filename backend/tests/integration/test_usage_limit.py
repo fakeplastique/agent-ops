@@ -1,4 +1,5 @@
 import asyncio
+import uuid
 
 import pytest
 from sqlalchemy import text
@@ -65,6 +66,4 @@ async def test_unlimited_plan_never_blocks(app_engine, owner_engine):
 
 
 async def test_unknown_organization_cannot_consume(app_engine):
-    import uuid
-
     assert not await _try(app_engine, uuid.uuid4(), JAN)
