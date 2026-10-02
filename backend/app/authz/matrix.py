@@ -13,9 +13,7 @@ class Action(StrEnum):
     READ = "read"
     CREATE_REQUEST = "create_request"
     POST_MESSAGE = "post_message"
-    DECIDE_TEAM_LEAD_STEP = "decide_team_lead_step"
-    DECIDE_MANAGER_STEP = "decide_manager_step"
-    DECIDE_ORG_ADMIN_STEP = "decide_org_admin_step"
+    DECIDE_STEP = "decide_step"  # the step's required_role and team scope are checked in duties.py
     MANAGE_ORG = "manage_org"
     READ_PLAN = "read_plan"
     # Role only; the DEMO_MODE switch is checked where the plan changes.
@@ -27,19 +25,10 @@ MIN_ROLE: dict[Action, Role] = {
     Action.READ: Role.MEMBER,
     Action.CREATE_REQUEST: Role.MEMBER,
     Action.POST_MESSAGE: Role.MEMBER,
-    Action.DECIDE_TEAM_LEAD_STEP: Role.TEAM_LEAD,
-    Action.DECIDE_MANAGER_STEP: Role.MANAGER,
-    Action.DECIDE_ORG_ADMIN_STEP: Role.ORG_ADMIN,
+    Action.DECIDE_STEP: Role.TEAM_LEAD,
     Action.MANAGE_ORG: Role.ORG_ADMIN,
     Action.READ_PLAN: Role.MEMBER,
     Action.CHANGE_PLAN: Role.ORG_ADMIN,
-}
-
-# A step's required_role picks which decide action it needs.
-STEP_ACTION: dict[Role, Action] = {
-    Role.TEAM_LEAD: Action.DECIDE_TEAM_LEAD_STEP,
-    Role.MANAGER: Action.DECIDE_MANAGER_STEP,
-    Role.ORG_ADMIN: Action.DECIDE_ORG_ADMIN_STEP,
 }
 
 

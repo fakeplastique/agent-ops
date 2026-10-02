@@ -1,3 +1,5 @@
+import signal
+from contextlib import contextmanager
 from dataclasses import replace
 from uuid import uuid4
 
@@ -15,8 +17,24 @@ def user(role: Role) -> UserPrincipal:
     return UserPrincipal(uuid4(), ORG, role)
 
 
+@contextmanager
+def within(seconds: int):
+    # No pytest-timeout: a hang must fail this test, not stall CI.
+    def boom(*_):
+        raise TimeoutError("did not terminate")
+
+    old = signal.signal(signal.SIGALRM, boom)
+    signal.alarm(seconds)
+    try:
+        yield
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, old)
+
+
 def step(required_role=Role.MANAGER, **changes) -> StepFacts:
     base = StepFacts(
+        organization_id=ORG,
         required_role=required_role,
         requested_by_user_id=None,
         agent_owner_id=None,
@@ -62,14 +80,20 @@ def test_team_lead_denied_when_request_has_no_team():
 def test_team_chain_cycle_terminates():
     a, b = uuid4(), uuid4()
     s = step(Role.TEAM_LEAD, request_team_id=a, team_parents={a: b, b: a})
-    assert not may_decide(user(Role.TEAM_LEAD), s, frozenset({SIBLING}))
+    with within(2):
+        assert not may_decide(user(Role.TEAM_LEAD), s, frozenset({SIBLING}))
 
 
-def test_user_with_prior_step_on_this_version_denied_new_version_allowed():
+def test_user_with_prior_step_on_this_version_denied():
+    # Which deciders count for a version is the caller's query (S10 pins the new-version case).
     admin = user(Role.ORG_ADMIN)
     assert not may_decide(admin, step(prior_decider_ids=frozenset({admin.user_id})), frozenset())
-    # A new version starts with an empty set of prior deciders.
-    assert may_decide(admin, step(prior_decider_ids=frozenset()), frozenset())
+
+
+def test_principal_of_another_organization_denied():
+    other = UserPrincipal(uuid4(), uuid4(), Role.ORG_ADMIN)
+    assert not may_decide(other, step(), frozenset())
+    assert may_decide(user(Role.ORG_ADMIN), step(), frozenset())
 
 
 def test_role_below_required_denied_and_org_wide_roles_need_no_team():

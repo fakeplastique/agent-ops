@@ -2,12 +2,13 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from uuid import UUID
 
-from app.authz.matrix import STEP_ACTION, Role, can
+from app.authz.matrix import Action, Role, can
 from app.authz.principals import Principal, UserPrincipal
 
 
 @dataclass(frozen=True)
 class StepFacts:
+    organization_id: UUID
     required_role: Role
     requested_by_user_id: UUID | None  # None when an agent created the request
     agent_owner_id: UUID | None
@@ -31,12 +32,16 @@ def leads_team_or_ancestor(
 def may_decide(who: Principal, step: StepFacts, led_team_ids: frozenset[UUID]) -> bool:
     if not isinstance(who, UserPrincipal):
         return False
+    if who.organization_id != step.organization_id:  # do not rely on RLS alone
+        return False
     if who.user_id in (step.requested_by_user_id, step.agent_owner_id):
         return False
     if who.user_id in step.prior_decider_ids:
         return False
-    action = STEP_ACTION.get(step.required_role)  # member steps do not exist: deny
-    if action is None or not can(who.role, action):
+    # Member steps do not exist: deny. Otherwise the role must reach the step's level.
+    if step.required_role is Role.MEMBER or who.role < step.required_role:
+        return False
+    if not can(who.role, Action.DECIDE_STEP):
         return False
     if who.role is Role.TEAM_LEAD:  # manager and org_admin are org-wide
         return leads_team_or_ancestor(step.request_team_id, led_team_ids, step.team_parents)
