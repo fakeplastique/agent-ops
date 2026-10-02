@@ -1,6 +1,6 @@
 name: deploy
 # Runs only after the ci gate passed on a push to main; PRs and branches never reach it.
-# Migrations run inside Railway as the api service's pre-deploy command (railway.json), so the database stays private.
+# Migrations run inside Railway as the api service's pre-deploy command (set on the service, not in a file), so the database stays private.
 on:
   workflow_run:
     workflows: [ci]
@@ -23,5 +23,6 @@ jobs:
           ref: ${{ github.event.workflow_run.head_sha }} # the commit that passed, not whatever main is now
       - run: npm i -g @railway/cli
       # api first: its pre-deploy migration must finish (additive schema) before web rolls out.
-      - run: railway up --service api --ci # repo root, so railway.json and backend/Dockerfile apply
-      - run: railway up frontend --service web --ci
+      - run: railway up --service api --ci # repo root: backend/Dockerfile needs scripts/
+      - run: railway up --service web --ci
+        working-directory: frontend # `railway up <path>` fails with "prefix not found"; cwd is the upload root
