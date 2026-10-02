@@ -9,6 +9,9 @@ failed=()
 images() {
   local rc=0 prod="docker compose --profile prod"
   $prod build && $prod up -d --wait api web || rc=1
+  # Railway's pre-deploy command: the image itself must be able to migrate as the owner.
+  $prod run --rm --no-deps -e MIGRATE_DATABASE_URL=postgresql://app:app@postgres:5432/agent_ops \
+    api scripts/migrate.sh || { echo "migrate.sh fails inside the api image"; rc=1; }
   for s in api web; do
     [ "$($prod exec -T $s id -u 2>/dev/null)" != 0 ] || { echo "$s runs as root"; rc=1; }
   done

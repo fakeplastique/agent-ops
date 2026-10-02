@@ -1,0 +1,9 @@
+.git
+frontend
+node_modules
+**/.venv
+**/__pycache__
+backend/tests
+backend/postman
+**/.pytest_cache
+**/.ruff_cache

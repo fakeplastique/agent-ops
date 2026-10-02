@@ -1,5 +1,6 @@
 name: deploy
 # Runs only after the ci gate passed on a push to main; PRs and branches never reach it.
+# Migrations run inside Railway as the api service's pre-deploy command (railway.json), so the database stays private.
 on:
   workflow_run:
     workflows: [ci]
@@ -20,12 +21,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.workflow_run.head_sha }} # the commit that passed, not whatever main is now
-      - uses: astral-sh/setup-uv@v5
-      - run: uv sync --project backend --no-dev
-      - name: Migrate as the owner role, before any new build serves traffic
-        run: scripts/migrate.sh
-        env:
-          MIGRATE_DATABASE_URL: ${{ secrets.MIGRATE_DATABASE_URL }}
       - run: npm i -g @railway/cli
-      - run: railway up backend --service api --ci
+      # api first: its pre-deploy migration must finish (additive schema) before web rolls out.
+      - run: railway up --service api --ci # repo root, so railway.json and backend/Dockerfile apply
       - run: railway up frontend --service web --ci

@@ -21,7 +21,7 @@ services:
   # Production images (profile prod): the gate builds them and checks non-root + health.
   api:
     profiles: ["prod"]
-    build: ./backend
+    build: { context: ., dockerfile: backend/Dockerfile } # repo root: the image carries scripts/migrate.sh
     environment:
       DATABASE_URL: postgresql://app_rt:app_rt@postgres:5432/agent_ops
       REDIS_URL: redis://redis:6379/0

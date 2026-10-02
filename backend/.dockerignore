@@ -1,6 +1,0 @@
-.venv
-__pycache__
-tests
-postman
-.pytest_cache
-.ruff_cache

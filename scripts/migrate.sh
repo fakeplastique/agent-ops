@@ -5,7 +5,9 @@ cd "$(dirname "$0")/.."
 : "${MIGRATE_DATABASE_URL:?set MIGRATE_DATABASE_URL to the owner role}"
 export BACKEND_DIR=${BACKEND_DIR:-backend}
 
-uv run --project backend python - <<'PY'
+# The api image sets MIGRATE_PYTHON=python (no uv project there).
+read -ra py <<< "${MIGRATE_PYTHON:-uv run --project backend python}"
+"${py[@]}" - <<'PY'
 import asyncio, os, sys
 from pathlib import Path
 
