@@ -34,6 +34,8 @@ class Risk(IntEnum):
         """Coerce a Risk, its exact lowercase name or its int. Bool, float and look-alikes fail closed."""
         if isinstance(value, cls):
             return value
+        if isinstance(value, int) and type(value) is not int:  # bool, or another enum's value 1
+            raise InvalidInput(f"unknown risk level {value!r}")
         if isinstance(value, str):
             level = {r.name.lower(): r for r in cls}.get(value)
         else:

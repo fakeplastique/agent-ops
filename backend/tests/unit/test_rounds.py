@@ -55,7 +55,7 @@ def test_round_two_uses_only_round_two_votes():
         outcome(stale + r2, rounds=2, round_no=2) is Event.ROUND_REJECTED
     )  # catches: stale round-1 mixed in
     assert (
-        outcome(stale + votes(A, round=2), round_no=2) is None
+        outcome(stale + votes(A, round=2), rounds=2, round_no=2) is None
     )  # one round-2 vote: round 2 not complete
 
 
@@ -128,3 +128,42 @@ def test_vote_round_must_be_a_positive_int():
     for bad in (True, "1", 0, -1, 1.0):
         with pytest.raises(InvalidInput):
             Vote(A, 0.9, bad)  # type: ignore[arg-type]
+
+
+def test_foreign_int_enum_is_not_a_risk():
+    from enum import IntEnum
+
+    class Other(IntEnum):
+        CRITICAL = 1
+
+    with pytest.raises(
+        InvalidInput
+    ):  # catches: another enum's value 1 passing as LOW and auto-approving
+        Risk.of(Other.CRITICAL)
+    with pytest.raises(InvalidInput):
+        outcome(votes(A, A, A), risk=Other.CRITICAL)  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    "name", ["Refund", "refund ", "refund\u200b", "rеfund", "", "a" * 65, "re fund", "ré"]
+)
+def test_look_alike_action_types_are_rejected_not_silently_medium(name):
+    # catches: a homoglyph/case variant escaping the HIGH floor set on 'refund'
+    with pytest.raises(InvalidInput):
+        effective_risk(Risk.LOW, name, {"refund": "high"})
+
+
+def test_well_formed_action_types_use_their_floor():
+    floors = {"refund": "high", "read.file-v2": "low"}
+    assert effective_risk(Risk.LOW, "refund", floors) is Risk.HIGH
+    assert effective_risk(Risk.LOW, "read.file-v2", floors) is Risk.LOW
+
+
+def test_floors_must_be_a_mapping():
+    with pytest.raises(InvalidInput):
+        effective_risk(Risk.LOW, "refund", ["refund"])  # type: ignore[arg-type]
+
+
+def test_round_number_cannot_exceed_rounds():
+    with pytest.raises(InvalidInput):
+        outcome(votes(A, A, A, round=2), rounds=1, round_no=2)

@@ -48,6 +48,8 @@ def round_outcome(
     _check_int("quorum_size", quorum_size)
     _check_int("rounds", rounds, (1, 2))
     _check_int("round_no", round_no, (1, 2))
+    if round_no > rounds:
+        raise InvalidInput("round_no exceeds the policy's rounds")
     current = [v for v in votes if v.round == round_no]  # round 2 never sees round-1 votes
     if len(current) < quorum_size:
         return None
