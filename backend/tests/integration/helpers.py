@@ -2,9 +2,12 @@ import json
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
+
+from app.domain.receipt import KeyRing
 
 
 class FakeClock:
@@ -92,13 +95,14 @@ async def make_policy(
     levels=None,
     timeout=60,
     floors=None,
+    distinct=True,
 ) -> uuid.UUID:
     pid = uuid.uuid4()
     await _exec(
         owner,
         "insert into escalation_policies (id, organization_id, team_id, name, quorum_size, rounds,"
-        " confidence_threshold, levels, voting_timeout_minutes, risk_floors)"
-        " values (:i, :o, :t, :n, :q, :r, :c, cast(:l as jsonb), :to, cast(:f as jsonb))",
+        " confidence_threshold, levels, voting_timeout_minutes, risk_floors, require_distinct_agents)"
+        " values (:i, :o, :t, :n, :q, :r, :c, cast(:l as jsonb), :to, cast(:f as jsonb), :d)",
         i=pid,
         o=org,
         t=team,
@@ -109,6 +113,7 @@ async def make_policy(
         to=timeout,
         l=json.dumps(levels or [{"role": "manager", "timeout_minutes": 60}]),
         f=json.dumps(floors or {}),
+        d=distinct,
     )
     return pid
 
@@ -151,3 +156,59 @@ async def make_world(owner, plan="free", **policy) -> World:
     await make_member(owner, org, user, "member")
     ident, sess = await make_agent(owner, org, user)
     return World(org, user, ident, sess, await make_policy(owner, org, **policy))
+
+
+KEYS = KeyRing.parse(f"t1:{'k' * 40}")
+
+
+async def add_agent(owner, w: "World") -> tuple[uuid.UUID, uuid.UUID]:
+    """Another agent identity (own session) in the world's organization."""
+    return await make_agent(owner, w.org, w.owner_user)
+
+
+NOW = FakeClock(utc(2026, 1, 15, 10, 0))
+ARGS = {
+    "title": "Refund order 7",
+    "description": "d",
+    "action_type": "refund",
+    "payload": {"amount": 5},
+    "risk_level": "low",
+}
+
+
+async def open_request(engine, w: "World", clock=NOW, **over) -> dict:
+    from app.db.session import tenant_session
+    from app.services.decisions import create_decision
+
+    kw: dict[str, Any] = {"agent_session_id": w.session} | ARGS | over
+    async with tenant_session(engine, w.org) as s:
+        return await create_decision(s, w.org, clock, **kw)
+
+
+async def cast(
+    engine, w: "World", req: dict, session, verdict="approve", confidence=0.9, **over
+) -> dict:
+    from app.db.session import tenant_session
+    from app.services.decisions import cast_vote
+
+    kw = {
+        "keys": KEYS,
+        "decision_request_id": req["id"],
+        "agent_session_id": session,
+        "request_version": req["version"],
+        "verdict": verdict,
+        "confidence": confidence,
+        "rationale": "because",
+    } | over
+    async with tenant_session(engine, w.org) as s:
+        return await cast_vote(s, w.org, NOW, **kw)
+
+
+async def voters(owner, w: "World", n: int) -> list[uuid.UUID]:
+    """n sessions, each of its own agent identity (the requester's identity is not among them)."""
+    return [(await add_agent(owner, w))[1] for _ in range(n)]
+
+
+async def fetch(owner, sql: str, **params) -> list:
+    async with owner.connect() as c:
+        return (await c.execute(text(sql), params)).all()

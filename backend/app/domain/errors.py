@@ -25,3 +25,19 @@ class PolicyExceedsPlan(DomainError):
 
 class PolicyUnresolved(DomainError):
     code = "policy_unresolved"
+
+
+class AlreadyVoted(DomainError):
+    code = "already_voted"
+
+
+class RoundClosed(DomainError):
+    code = "round_closed"
+
+
+class StaleVersion(DomainError):
+    code = "stale_version"
+
+
+class VoteNotAllowed(DomainError):
+    code = "vote_not_allowed"
