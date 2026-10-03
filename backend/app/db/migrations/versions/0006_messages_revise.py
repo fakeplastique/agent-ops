@@ -53,17 +53,29 @@ def upgrade() -> None:
 
     # Revise rewrites the content and bumps the version; the timer is also reset on entering discussion.
     op.execute(f"GRANT UPDATE ({REVISE}) ON decision_requests TO app_rt")
+
     # A decided request keeps its content and version forever, so a receipt can never outlive a change (I4, I12);
     # the version only ever moves up by one.
-    new = ", ".join(f"NEW.{c.strip()}" for c in CONTENT.split(","))
-    old = ", ".join(f"OLD.{c.strip()}" for c in CONTENT.split(","))
+    def row(prefix: str, cols: str) -> str:
+        return "(" + ", ".join(f"{prefix}.{c.strip()}" for c in cols.split(",")) + ")"
+
+    bound = "title, action_type, payload, risk_level"  # what content_hash covers
+    shown = f"{bound}, description, effective_risk_level"
     op.execute(
         "CREATE FUNCTION decision_content_guard() RETURNS trigger LANGUAGE plpgsql AS $$"
         " BEGIN"
         "  IF NEW.version <> OLD.version AND NEW.version <> OLD.version + 1 THEN"
         "   RAISE EXCEPTION 'version moves up by one'; END IF;"
-        f"  IF OLD.status IN ('approved', 'rejected', 'expired', 'cancelled') AND ({new}) IS DISTINCT FROM ({old}) THEN"
+        f"  IF OLD.status IN ('approved', 'rejected', 'expired', 'cancelled') AND {row('NEW', CONTENT)}"
+        f"   IS DISTINCT FROM {row('OLD', CONTENT)} THEN"
         "   RAISE EXCEPTION 'a decided request keeps its content and version'; END IF;"
+        # An open request changes content only through a revise: version + 1, and a new hash whenever a
+        # field the hash covers changed (and a new hash only then), so content and hash cannot drift apart.
+        f"  IF ({row('NEW', shown)} IS DISTINCT FROM {row('OLD', shown)} OR NEW.policy_snapshot IS DISTINCT FROM OLD.policy_snapshot)"
+        "   AND NEW.version <> OLD.version + 1 THEN"
+        "   RAISE EXCEPTION 'content changes only with a version bump'; END IF;"
+        f"  IF ({row('NEW', bound)} IS DISTINCT FROM {row('OLD', bound)}) <> (NEW.content_hash <> OLD.content_hash) THEN"
+        "   RAISE EXCEPTION 'content_hash must change exactly when hashed content changes'; END IF;"
         " RETURN NEW; END $$"
     )
     op.execute(

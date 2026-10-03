@@ -458,7 +458,14 @@ async def revise_decision(
         "risk_level": req["risk_level"] if risk_level is None else Risk.of(risk_level).name.lower(),
     }
     _validate(new["title"], new["description"], new["action_type"], new["payload"])
-    fields = [f for f in new if new[f] != old[f]]
+    # Payloads compare as the hash sees them (1 == 1.0, but True != 1), not as Python dicts do.
+    same = {
+        f: (canonical_json(new[f]) == canonical_json(old[f]))
+        if f == "payload"
+        else new[f] == old[f]
+        for f in new
+    }
+    fields = [f for f in new if not same[f]]
     if not fields:
         raise InvalidInput("nothing to revise")
     declared = Risk.of(new["risk_level"])

@@ -328,3 +328,19 @@ async def test_withdraw_supersedes_pending_steps_and_keeps_blind_votes_blind(
     async with tenant_session(app_engine, w2.org) as s:
         out = await visible_votes(s, w2.org, mid["id"], viewer_session_id=None)
     assert out["votes"] == [] and out["status"] == "cancelled"  # withdrawing never unmasks round 1
+
+
+async def test_revise_compares_the_payload_the_way_the_hash_does(app_engine, owner_engine):
+    w = await make_world(owner_engine)
+    req = await open_request(app_engine, w, payload={"a": 1, "b": 2})
+    with pytest.raises(InvalidInput):  # 1 and 1.0 hash alike: nothing changed
+        await revise(app_engine, w, req, payload={"a": 1.0, "b": 2})
+    out = await revise(app_engine, w, req, payload={"a": True, "b": 2})  # True is not 1 to the hash
+    assert out["fields"] == ["payload"]
+    out2 = await revise(
+        app_engine, w, {**req, "version": 2}, title="new title", payload={"a": 1, "b": 2}
+    )
+    assert out2["fields"] == [
+        "title",
+        "payload",
+    ]  # catches: a rewritten payload missing from the diff

@@ -88,3 +88,45 @@ async def test_messages_constraints_and_grants(app_engine, owner_engine):
             "select relrowsecurity, relforcerowsecurity from pg_class where relname='messages'",
         )
     ) == [(True, True)]
+
+
+async def test_content_of_a_pending_request_changes_only_with_a_version_bump_and_a_new_hash(
+    app_engine, owner_engine
+):
+    w = await make_world(owner_engine)
+    req = await open_request(app_engine, w)
+    r = req["id"]
+    new_hash = "b" * 64
+    # catches: content and its hash drifting apart without going through revise
+    assert await refused(owner_engine, "update decision_requests set title='x' where id=:r", r=r)
+    assert await refused(owner_engine, "update decision_requests set payload='{}' where id=:r", r=r)
+    assert await refused(
+        owner_engine,
+        "update decision_requests set risk_level='high', effective_risk_level='high' where id=:r",
+        r=r,
+    )
+    assert await refused(
+        owner_engine, "update decision_requests set description='x' where id=:r", r=r
+    )
+    assert await refused(
+        owner_engine, "update decision_requests set policy_snapshot='{}' where id=:r", r=r
+    )
+    assert await refused(
+        owner_engine, "update decision_requests set content_hash=:h where id=:r", r=r, h=new_hash
+    )
+    # a bump with a hash-bound change must also change the hash
+    assert await refused(
+        owner_engine, "update decision_requests set title='x', version=2 where id=:r", r=r
+    )
+    # a bump alone, a description-only revise (the hash does not cover it), and a full revise are fine
+    assert not await refused(
+        owner_engine, "update decision_requests set description='x', version=2 where id=:r", r=r
+    )
+    full = "update decision_requests set title='y', content_hash=:h, version=3 where id=:r"
+    assert not await refused(owner_engine, full, r=r, h=new_hash)
+    # timer and status moves do not touch content
+    assert not await refused(
+        owner_engine,
+        "update decision_requests set voting_deadline_at = now() + interval '1 hour', updated_at=now() where id=:r",
+        r=r,
+    )
