@@ -212,3 +212,63 @@ async def voters(owner, w: "World", n: int) -> list[uuid.UUID]:
 async def fetch(owner, sql: str, **params) -> list:
     async with owner.connect() as c:
         return (await c.execute(text(sql), params)).all()
+
+
+LEVELS3 = [
+    {"role": "team_lead", "timeout_minutes": 30},
+    {"role": "manager", "timeout_minutes": 60},
+    {"role": "org_admin", "timeout_minutes": 120},
+]
+
+
+async def staff(owner, org, role, team=None) -> uuid.UUID:
+    """A user with a membership of this role (and team) in the organization."""
+    user = await make_user(owner)
+    await make_member(owner, org, user, role, team)
+    return user
+
+
+async def approval_world(owner, app_engine, *, high=False, levels=None, plan="pro", team=True):
+    """A request sitting in pending_approval with its first step created.
+
+    Returns (world, request, team_id). The requester agent's owner is a member of `team`."""
+    floors = {"refund": "high" if high else "medium"}
+    w = await make_world(owner, plan, floors=floors, levels=levels or LEVELS3)
+    team_id = await make_team(owner, w.org) if team else None
+    if team_id:
+        async with owner.begin() as c:
+            await c.execute(
+                text("update memberships set team_id=:t where organization_id=:o and user_id=:u"),
+                {"t": team_id, "o": w.org, "u": w.owner_user},
+            )
+    req = await open_request(app_engine, w)
+    for s in await voters(owner, w, 3):
+        await cast(app_engine, w, req, s)
+    return w, req, team_id
+
+
+async def pending_step(owner, req) -> tuple[uuid.UUID, int, str]:
+    rows = await fetch(
+        owner,
+        "select id, level, required_role from approval_steps where decision_request_id=:r and status='pending'",
+        r=req["id"],
+    )
+    assert len(rows) == 1, rows
+    return rows[0]
+
+
+async def decide(
+    engine, w, step_id, user, role="org_admin", approve=True, comment="", version=1, clock=NOW
+):
+    from app.authz.matrix import Role
+    from app.authz.principals import UserPrincipal
+    from app.db.session import tenant_session
+    from app.services.steps import decide_step
+
+    # The claimed role is deliberately arbitrary: the service must read the real one.
+    who = UserPrincipal(user, w.org, Role[role.upper()])
+    async with tenant_session(engine, w.org) as s:
+        return await decide_step(
+            s, w.org, clock, keys=KEYS, who=who, step_id=step_id, request_version=version,
+            approve=approve, comment=comment,
+        )  # fmt: skip

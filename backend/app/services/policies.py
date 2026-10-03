@@ -30,6 +30,7 @@ _RESOLVE = text(
     limit 1
     """
 )
+_OWNER_TEAM = text("select team_id from memberships where organization_id = :o and user_id = :u")
 _PLAN = text(
     "select p.max_quorum, p.max_rounds, p.max_levels from organizations o"
     " join plans p on p.key = o.plan_key where o.id = :o"
@@ -47,7 +48,12 @@ async def resolve_policy(
     )
     if row is None:
         raise PolicyUnresolved  # no team policy and no org default: nothing may decide this request
+    owner_team = (
+        await session.execute(_OWNER_TEAM, {"o": organization_id, "u": owner_user_id})
+    ).scalar()
     return {
+        # The requester's own team, frozen with the request: a team_lead step is scoped to it (D16).
+        "owner_team_id": str(owner_team) if owner_team else None,
         "policy_id": str(row["id"]),
         "team_id": str(row["team_id"]) if row["team_id"] else None,
         "quorum_size": row["quorum_size"],

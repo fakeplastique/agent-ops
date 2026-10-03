@@ -111,6 +111,7 @@ async def test_snapshot_holds_the_resolved_values(owner_engine, app_engine):
     assert snap | {"policy_id": None, "team_id": None} == {
         "policy_id": None,
         "team_id": None,
+        "owner_team_id": None,
         "quorum_size": 2,
         "require_distinct_agents": True,
         "rounds": 1,
