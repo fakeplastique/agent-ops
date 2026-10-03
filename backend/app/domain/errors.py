@@ -17,3 +17,11 @@ class InvalidInput(DomainError, ValueError):
 
 class IllegalTransitionError(DomainError):
     code = "illegal_transition"
+
+
+class PolicyExceedsPlan(DomainError):
+    code = "policy_exceeds_plan"
+
+
+class PolicyUnresolved(DomainError):
+    code = "policy_unresolved"
