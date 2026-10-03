@@ -13,6 +13,7 @@ from app.domain.statuses import Status
 
 ALG = "HS256"
 _HASH = re.compile(r"[0-9a-f]{64}")
+_SIG = re.compile(r"[0-9a-f]{64}")
 _KID = re.compile(r"[A-Za-z0-9_.-]{1,32}")
 _ENVELOPE = {"alg", "kid", "payload", "signature"}
 MIN_SECRET = 32
@@ -68,7 +69,12 @@ class KeyRing:
         kid = ""
         for part in raw.split(","):
             kid, _, secret = part.partition(":")
-            if not _KID.fullmatch(kid) or len(secret) < MIN_SECRET or kid in secrets:
+            if (
+                not _KID.fullmatch(kid)
+                or len(secret) < MIN_SECRET
+                or secret != secret.strip()
+                or kid in secrets
+            ):
                 raise InvalidInput(
                     f"bad receipt key entry (kid {kid!r}): need a unique kid and 32+ char secret"
                 )
@@ -102,8 +108,10 @@ def verify(receipt: Any, live: Subject, live_status: Status, keys: KeyRing) -> b
     kid, payload, signature = receipt["kid"], receipt["payload"], receipt["signature"]
     if receipt["alg"] != ALG or not isinstance(kid, str) or kid not in keys.secrets:
         return False
-    if not isinstance(payload, dict) or not isinstance(signature, str):
-        return False
+    if not isinstance(payload, dict) or type(payload.get("version")) is not int:
+        return False  # 1.0 is value-equal to 1 but not the signed bytes
+    if not isinstance(signature, str) or not _SIG.fullmatch(signature):
+        return False  # also keeps a lone surrogate from reaching encode()
     try:
         expected = _mac(keys.secrets[kid], kid, payload)
     except InvalidInput:  # NaN, huge ints, non-JSON values

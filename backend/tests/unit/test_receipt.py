@@ -164,6 +164,9 @@ def test_malformed_variants_of_a_real_receipt_are_invalid():
         lambda r: r["payload"].pop("version"),
         lambda r: r.update(signature="é" * 64),
         lambda r: r.update(signature=123),
+        lambda r: r.update(signature="\ud800"),  # lone surrogate: must not raise on encode
+        lambda r: r.update(signature=r["signature"].upper()),
+        lambda r: r["payload"].update(version=2.0),  # value-equal but not the signed bytes
         lambda r: r.update(signature=r["signature"][:-2]),
         lambda r: r.update(kid=["k2"]),
         lambda r: r["payload"].update(version=True),
@@ -200,6 +203,9 @@ def test_key_ring_parsing_fails_closed():
         f"a:{'x' * 32},a:{'y' * 32}",
         f":{'x' * 32}",
         f"a:{'x' * 32},",
+        f"a:{'x' * 32}\n",  # a trailing newline from an env file is part of the key on one host only
+        f"a: {'x' * 32}",
+        f"a:{' ' * 32}",
     ):
         with pytest.raises(InvalidInput):
             KeyRing.parse(bad)
