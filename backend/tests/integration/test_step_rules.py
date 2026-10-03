@@ -309,3 +309,60 @@ async def test_the_same_user_cannot_reverse_a_decision_by_retrying(app_engine, o
     with pytest.raises(AlreadyDecided):  # catches: a retry flipping an approval into a rejection
         await decide(app_engine, w, step, user, "manager", approve=False)
     assert (await request_row(owner_engine, req))[0] == "approved"
+
+
+async def test_manager_and_org_admin_may_decide_a_team_lead_step_org_wide(app_engine, owner_engine):
+    for role in ("manager", "org_admin"):
+        w, req, _ = await approval_world(owner_engine, app_engine)
+        step, _, required = await pending_step(owner_engine, req)
+        assert required == "team_lead"
+        user = await staff(
+            owner_engine, w.org, role
+        )  # no team at all: roles above team_lead are org-wide
+        assert (await decide(app_engine, w, step, user, role))["status"] == "approved"
+
+
+@pytest.mark.parametrize("bad", ["a\x00b", "\ud800", "x" * 4097])
+async def test_invalid_comment_is_rejected_and_the_step_stays_pending(
+    app_engine, owner_engine, bad
+):
+    from app.domain.errors import InvalidInput
+
+    w, req, _ = await approval_world(
+        owner_engine, app_engine, levels=[{"role": "manager", "timeout_minutes": 60}]
+    )
+    step, *_ = await pending_step(owner_engine, req)
+    user = await staff(owner_engine, w.org, "manager")
+    with pytest.raises(InvalidInput):
+        await decide(app_engine, w, step, user, "manager", comment=bad)
+    assert (await pending_step(owner_engine, req))[0] == step
+
+
+@pytest.mark.parametrize("version", [True, 1.0, "1", None])
+async def test_request_version_must_be_a_plain_int(app_engine, owner_engine, version):
+    from app.domain.errors import InvalidInput
+
+    w, req, _ = await approval_world(
+        owner_engine, app_engine, levels=[{"role": "manager", "timeout_minutes": 60}]
+    )
+    step, *_ = await pending_step(owner_engine, req)
+    with pytest.raises(InvalidInput):  # catches: True passing as version 1
+        await decide(
+            app_engine,
+            w,
+            step,
+            await staff(owner_engine, w.org, "manager"),
+            "manager",
+            version=version,
+        )
+
+
+async def test_a_replay_has_the_same_shape_as_the_first_answer(app_engine, owner_engine):
+    w, req, _ = await approval_world(
+        owner_engine, app_engine, levels=[{"role": "manager", "timeout_minutes": 60}]
+    )
+    step, *_ = await pending_step(owner_engine, req)
+    user = await staff(owner_engine, w.org, "manager")
+    first = await decide(app_engine, w, step, user, "manager")
+    again = await decide(app_engine, w, step, user, "manager")
+    assert set(first) == set(again) and again["replayed"] and not first["replayed"]

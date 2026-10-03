@@ -120,3 +120,24 @@ async def test_snapshot_holds_the_resolved_values(owner_engine, app_engine):
         "voting_timeout_minutes": 45,
         "risk_floors": {"refund": "high"},
     }
+
+
+@pytest.mark.parametrize(
+    "levels",
+    [
+        [{"role": "member", "timeout_minutes": 5}],
+        [{"role": "Manager", "timeout_minutes": 5}],
+        [{"role": "manager"}],
+        [{"role": "manager", "timeout_minutes": 0}],
+        [{"role": "manager", "timeout_minutes": True}],
+        [{"role": "manager", "timeout_minutes": "5"}],
+        ["manager"],
+        [{"role": "manager", "timeout_minutes": 5}, "x"],
+    ],
+)
+async def test_a_malformed_level_fails_closed_at_resolution(owner_engine, app_engine, levels):
+    # catches: a request stuck in voting because opening its first step fails later
+    org = await make_org(owner_engine)
+    await make_policy(owner_engine, org, levels=levels)
+    with pytest.raises(PolicyUnresolved):
+        await resolve(app_engine, org, await make_user(owner_engine))

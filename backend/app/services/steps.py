@@ -11,6 +11,7 @@ from app.authz.principals import Principal, UserPrincipal
 from app.domain.errors import (
     AlreadyDecided,
     Forbidden,
+    InvalidInput,
     NotFoundError,
     StaleVersion,
     StepNotPending,
@@ -104,6 +105,8 @@ async def decide_step(
     Authority is rechecked here from the database (role and team now, not as listed in an inbox), and the
     request row lock makes concurrent deciders take turns: the loser finds the step no longer pending."""
     o = organization_id
+    if type(request_version) is not int:  # True == 1, 1.0 == 1: neither is a version
+        raise InvalidInput("request_version must be an int")
     if not isinstance(who, UserPrincipal) or who.organization_id != o:
         raise Forbidden(
             "only users of this organization decide steps"
@@ -129,6 +132,7 @@ async def decide_step(
             "step_id": step_id,
             "status": step["status"],
             "request_status": req["status"],
+            "next_step_id": None,
             "replayed": True,
         }
     if (

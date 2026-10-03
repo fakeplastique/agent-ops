@@ -108,3 +108,35 @@ async def test_step_constraints_and_tenancy(app_engine, owner_engine):
         "select relrowsecurity, relforcerowsecurity from pg_class where relname='approval_steps'",
     )
     assert rls == [(True, True)]
+
+
+async def test_runtime_role_cannot_insert_an_already_decided_step(app_engine, owner_engine):
+    from app.db.session import tenant_session
+
+    w, req, _ = await approval_world(owner_engine, app_engine)
+    user = await staff(owner_engine, w.org, "org_admin")
+    async with (
+        owner_engine.begin() as c
+    ):  # clear the pending step so inserts are not blocked by the pending index
+        await c.execute(
+            text("update approval_steps set status='timed_out' where decision_request_id=:r"),
+            {"r": req["id"]},
+        )
+    base = "insert into approval_steps (organization_id, decision_request_id, request_version, level, required_role, due_at{cols}) values (:o, :r, 1, :l, 'manager', now(){vals})"
+
+    async def as_app(level, cols="", vals="") -> bool:
+        try:
+            async with tenant_session(app_engine, w.org) as s:
+                await s.execute(
+                    text(base.format(cols=cols, vals=vals)),
+                    {"o": w.org, "r": req["id"], "l": level, "u": user},
+                )
+        except DBAPIError:
+            return False
+        return True
+
+    # catches: a decided step forged into the audit trail (the guard trigger is UPDATE-only)
+    assert not await as_app(2, ", status, approver_user_id, decided_at", ", 'approved', :u, now()")
+    assert not await as_app(2, ", approver_user_id", ", :u")
+    assert not await as_app(2, ", comment", ", 'x'")
+    assert await as_app(2)

@@ -80,7 +80,13 @@ def upgrade() -> None:
         f"CREATE POLICY tenant_isolation ON approval_steps USING (organization_id = {ORG})"
         f" WITH CHECK (organization_id = {ORG})"
     )
-    op.execute("GRANT SELECT, INSERT ON approval_steps TO app_rt")
+    op.execute("GRANT SELECT ON approval_steps TO app_rt")
+    # A step is born pending: INSERT cannot name a status, decider, comment or decision time, so a decided
+    # step cannot be forged (the guard trigger below only sees UPDATEs).
+    op.execute(
+        "GRANT INSERT (organization_id, decision_request_id, request_version, level, required_role, due_at)"
+        " ON approval_steps TO app_rt"
+    )
     op.execute(
         "GRANT UPDATE (status, approver_user_id, comment, decided_at) ON approval_steps TO app_rt"
     )

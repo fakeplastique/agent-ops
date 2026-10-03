@@ -37,6 +37,19 @@ _PLAN = text(
 )
 
 
+LEVEL_ROLES = frozenset({"team_lead", "manager", "org_admin"})
+
+
+def _valid_levels(levels: Any) -> bool:
+    return isinstance(levels, list) and all(
+        isinstance(lv, dict)
+        and lv.get("role") in LEVEL_ROLES
+        and type(lv.get("timeout_minutes")) is int
+        and lv["timeout_minutes"] >= 1
+        for lv in levels
+    )
+
+
 async def resolve_policy(
     session: AsyncSession, organization_id: uuid.UUID, owner_user_id: uuid.UUID
 ) -> dict[str, Any]:
@@ -48,6 +61,10 @@ async def resolve_policy(
     )
     if row is None:
         raise PolicyUnresolved  # no team policy and no org default: nothing may decide this request
+    if not _valid_levels(
+        row["levels"]
+    ):  # fail closed now, not later when the first step cannot open
+        raise PolicyUnresolved
     owner_team = (
         await session.execute(_OWNER_TEAM, {"o": organization_id, "u": owner_user_id})
     ).scalar()
