@@ -8,6 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.errors import (
     AlreadyVoted,
+    DiscussionRequired,
+    Forbidden,
     IllegalTransitionError,
     InvalidInput,
     NotFoundError,
@@ -20,9 +22,10 @@ from app.domain.receipt import KeyRing, Subject, sign
 from app.domain.risk import ACTION_TYPE, effective_risk
 from app.domain.rounds import Vote, round_outcome
 from app.domain.statuses import Risk, Status
-from app.domain.transitions import transition
+from app.domain.transitions import Event, transition
 from app.ports.clock import Clock
 from app.services import audit, outbox
+from app.services.messages import post_system_message
 from app.services.policies import ensure_fits_plan, resolve_policy
 from app.services.status import change_status
 from app.services.steps import open_first_step
@@ -75,6 +78,13 @@ def _validate(title: Any, description: Any, action_type: Any, payload: Any) -> N
         raise InvalidInput(f"payload exceeds {PAYLOAD_MAX} bytes")
 
 
+async def _payload_json(session: AsyncSession, payload: dict[str, Any]) -> str:
+    payload_json = json.dumps(payload, allow_nan=False)
+    if (await session.scalar(_STORED_SIZE, {"p": payload_json})) > PAYLOAD_MAX:
+        raise InvalidInput(f"payload exceeds {PAYLOAD_MAX} bytes")
+    return payload_json
+
+
 async def create_decision(
     session: AsyncSession,
     organization_id: uuid.UUID,
@@ -94,9 +104,7 @@ async def create_decision(
     # Also rejects NaN and lone surrogates; hashes the DECLARED risk (a floor change must not void receipts).
     digest = content_hash(title, action_type, payload, declared)
 
-    payload_json = json.dumps(payload, allow_nan=False)
-    if (await session.scalar(_STORED_SIZE, {"p": payload_json})) > PAYLOAD_MAX:
-        raise InvalidInput(f"payload exceeds {PAYLOAD_MAX} bytes")
+    payload_json = await _payload_json(session, payload)
 
     if agent_session_id is not None and user_id is None:
         agent = (
@@ -191,6 +199,13 @@ _ROUND_VOTES = text(
     " where v.organization_id = :o and v.decision_request_id = :r and v.request_version = :ver"
     " and v.round = :rd and i.status = 'active' order by v.created_at, v.id"
 )
+_DISCUSSED = text(
+    "select exists (select 1 from messages where organization_id = :o and decision_request_id = :r"
+    " and request_version = :v and author_type <> 'system')"
+)
+_SET_DEADLINE = text(
+    "update decision_requests set voting_deadline_at = :d where organization_id = :o and id = :r"
+)
 _REVEAL = text(
     "update votes set revealed_at = :now where organization_id = :o and decision_request_id = :r"
     " and request_version = :ver and round = 1"
@@ -237,12 +252,17 @@ async def cast_vote(
         raise NotFoundError
     if request_version != req["version"]:
         raise StaleVersion
-    if req["status"] != "pending_votes":  # round 2 opens with S11's discussion gate
+    if req["status"] not in ("pending_votes", "pending_discussion"):
         raise RoundClosed
     if (
         clock.now() >= req["voting_deadline_at"]
     ):  # rule 7: past the deadline humans take over, never auto-approve
         raise RoundClosed
+    rd = 1 if req["status"] == "pending_votes" else 2
+    if rd == 2 and not await session.scalar(_DISCUSSED, {"o": o, "r": r, "v": req["version"]}):
+        # Round 2 follows a discussion. (The plan's "or the deadline passed" branch is the escalation
+        # above: once the timer runs out humans take over, so no vote can arrive after it.)
+        raise DiscussionRequired
     snapshot = req["policy_snapshot"]
     quorum = snapshot["quorum_size"]
 
@@ -262,7 +282,7 @@ async def cast_vote(
     state = (
         await session.execute(
             _ROUND_STATE,
-            {"o": o, "r": r, "ver": req["version"], "rd": 1, "s": agent_session_id, "i": identity},
+            {"o": o, "r": r, "ver": req["version"], "rd": rd, "s": agent_session_id, "i": identity},
         )
     ).one()
     if state.same_session or (snapshot["require_distinct_agents"] and state.same_identity):
@@ -272,22 +292,25 @@ async def cast_vote(
         await session.execute(
             _INSERT_VOTE,
             {
-                "o": o, "r": r, "s": agent_session_id, "rd": 1, "ver": req["version"],
+                "o": o, "r": r, "s": agent_session_id, "rd": rd, "ver": req["version"],
                 "verdict": vote.verdict.value, "confidence": vote.confidence, "rationale": rationale,
             },
         )
     ).scalar_one()  # fmt: skip
     cast = state.n + 1
     # Round 1 is blind: neither audit nor outbox names a verdict or confidence (nor the rationale, ever).
-    common = {"decision_request_id": str(r), "session_id": str(agent_session_id), "round": 1,
+    # Round 2 follows an open discussion and is not blind.
+    common = {"decision_request_id": str(r), "session_id": str(agent_session_id), "round": rd,
               "request_version": req["version"]}  # fmt: skip
+    if rd == 2:
+        common |= {"verdict": vote.verdict.value, "confidence": vote.confidence}
     await audit.record(session, o, "vote", vote_id, "cast", "agent", identity, common)
     await outbox.emit(session, o, "vote.cast", common | {"cast": cast, "quorum": quorum})
 
     status = req["status"]
     if cast == quorum:
-        status = await _close_round(session, o, clock, keys, req, snapshot)
-    return {"vote_id": vote_id, "round": 1, "cast": cast, "quorum": quorum, "status": status}
+        status = await _close_round(session, o, clock, keys, req, snapshot, rd)
+    return {"vote_id": vote_id, "round": rd, "cast": cast, "quorum": quorum, "status": status}
 
 
 async def _close_round(
@@ -297,16 +320,17 @@ async def _close_round(
     keys: KeyRing,
     req: Any,
     snapshot: dict[str, Any],
+    rd: int,
 ) -> str:
     r, version = req["id"], req["version"]
-    rows = (await session.execute(_ROUND_VOTES, {"o": o, "r": r, "ver": version, "rd": 1})).all()
+    rows = (await session.execute(_ROUND_VOTES, {"o": o, "r": r, "ver": version, "rd": rd})).all()
     event = round_outcome(
         [Vote(v.verdict, v.confidence, v.round) for v in rows],
         risk=Risk.of(req["effective_risk_level"]),
         quorum_size=snapshot["quorum_size"],
         threshold=snapshot["confidence_threshold"],
         rounds=snapshot["rounds"],
-        round_no=1,
+        round_no=rd,
     )
     if event is None:  # called only with a full quorum, so unreachable
         raise IllegalTransitionError("the round is not complete")
@@ -317,16 +341,203 @@ async def _close_round(
         if new is Status.APPROVED
         else None
     )
-    await session.execute(_REVEAL, {"o": o, "r": r, "ver": version, "now": now})
-    revealed = {
-        "decision_request_id": str(r), "round": 1, "request_version": version,
-        "votes": [{"session_id": str(v.session_id), "verdict": v.verdict, "confidence": v.confidence} for v in rows],
-    }  # fmt: skip
-    await audit.record(
-        session, o, "decision_request", r, "round_revealed", "system", None, revealed
-    )
-    await outbox.emit(session, o, "round.revealed", revealed)
+    if rd == 1:  # the blind round is revealed by closing; round 2 was never hidden
+        await session.execute(_REVEAL, {"o": o, "r": r, "ver": version, "now": now})
+        revealed = {
+            "decision_request_id": str(r), "round": 1, "request_version": version,
+            "votes": [{"session_id": str(v.session_id), "verdict": v.verdict, "confidence": v.confidence} for v in rows],
+        }  # fmt: skip
+        await audit.record(
+            session, o, "decision_request", r, "round_revealed", "system", None, revealed
+        )
+        await outbox.emit(session, o, "round.revealed", revealed)
     await change_status(session, o, r, version, old, new, now, receipt, "system", None)
     if new is Status.PENDING_APPROVAL:
         await open_first_step(session, o, r, version, snapshot, now)
+    if new is Status.PENDING_DISCUSSION:  # the same timer runs again from entry to the discussion
+        await session.execute(
+            _SET_DEADLINE,
+            {"o": o, "r": r, "d": now + timedelta(minutes=snapshot["voting_timeout_minutes"])},
+        )
     return new.value
+
+
+_REQUEST_FOR_UPDATE = text(
+    "select id, status, version, title, description, action_type, payload, risk_level,"
+    " requested_by_session_id from decision_requests where organization_id = :o and id = :r for update"
+)
+_IDENTITY_OWNER = text(
+    "select i.id, i.status, i.owner_user_id from agent_sessions s join agent_identities i"
+    " on i.organization_id = s.organization_id and i.id = s.agent_identity_id"
+    " where s.organization_id = :o and s.id = :s"
+)
+_ROLE = text("select role from memberships where organization_id = :o and user_id = :u")
+_REVISE = text(
+    "update decision_requests set title = :title, description = :description, action_type = :action_type,"
+    " payload = cast(:payload as jsonb), risk_level = :risk, effective_risk_level = :effective,"
+    " content_hash = :hash, version = version + 1, policy_snapshot = cast(:snapshot as jsonb),"
+    " voting_deadline_at = :deadline, updated_at = :now where organization_id = :o and id = :r"
+    " and version = :v returning version"
+)
+_SUPERSEDE = text(
+    "update approval_steps set status = 'superseded' where organization_id = :o"
+    " and decision_request_id = :r and status = 'pending'"
+)
+
+
+def _cap(value: Any, n: int = 60) -> str:
+    text_ = str(value)
+    return text_ if len(text_) <= n else text_[: n - 1] + "…"
+
+
+def _diff_body(version: int, old: Any, new: dict[str, Any], fields: list[str]) -> str:
+    parts = []
+    for f in fields:
+        if f == "payload":  # never copy the payload into the thread: sizes only
+            parts.append(
+                f"payload changed ({len(json.dumps(old[f]))} -> {len(json.dumps(new[f]))} bytes)"
+            )
+        else:
+            parts.append(f"{f}: {_cap(old[f])!r} -> {_cap(new[f])!r}")
+    return f"Revised to version {version}: " + "; ".join(parts)
+
+
+async def _requester_identity(
+    session: AsyncSession, o: uuid.UUID, agent_session_id: uuid.UUID, req: Any
+) -> Any:
+    """The caller's agent identity, if it is active and is the identity that made this request."""
+    me = (await session.execute(_IDENTITY_OWNER, {"o": o, "s": agent_session_id})).first()
+    if me is None:
+        raise NotFoundError
+    if me.status != "active":
+        raise Forbidden("this agent identity is not active")
+    if req["requested_by_session_id"] is None:
+        raise Forbidden("only the requesting agent identity may do this")
+    requester = (
+        await session.execute(_IDENTITY_OF, {"o": o, "s": req["requested_by_session_id"]})
+    ).scalar_one()
+    if requester != me.id:  # the identity, not the session: a new session of the same agent may act
+        raise Forbidden("only the requesting agent identity may do this")
+    return me
+
+
+async def revise_decision(
+    session: AsyncSession,
+    organization_id: uuid.UUID,
+    clock: Clock,
+    *,
+    decision_request_id: uuid.UUID,
+    agent_session_id: uuid.UUID,
+    title: str | None = None,
+    description: str | None = None,
+    action_type: str | None = None,
+    payload: dict[str, Any] | None = None,
+    risk_level: Any = None,
+) -> dict[str, Any]:
+    """The original agent identity changes a pending request: version + 1, old votes and steps stop counting.
+
+    Votes stay in history but every count is version-scoped; pending steps are superseded; the policy is
+    re-resolved (and must still fit the plan); the timer restarts. Revisions do not count against the plan."""
+    o, r = organization_id, decision_request_id
+    req = (await session.execute(_REQUEST_FOR_UPDATE, {"o": o, "r": r})).mappings().first()
+    if req is None:
+        raise NotFoundError
+    me = await _requester_identity(session, o, agent_session_id, req)
+    old_status = Status(req["status"])
+    new_status = transition(
+        old_status, Event.REVISE
+    )  # terminal requests raise IllegalTransitionError
+
+    old = {k: req[k] for k in ("title", "description", "action_type", "payload")}
+    old["risk_level"] = req["risk_level"]
+    new = {
+        "title": req["title"] if title is None else title,
+        "description": req["description"] if description is None else description,
+        "action_type": req["action_type"] if action_type is None else action_type,
+        "payload": req["payload"] if payload is None else payload,
+        "risk_level": req["risk_level"] if risk_level is None else Risk.of(risk_level).name.lower(),
+    }
+    _validate(new["title"], new["description"], new["action_type"], new["payload"])
+    fields = [f for f in new if new[f] != old[f]]
+    if not fields:
+        raise InvalidInput("nothing to revise")
+    declared = Risk.of(new["risk_level"])
+    digest = content_hash(new["title"], new["action_type"], new["payload"], declared)
+    payload_json = await _payload_json(session, new["payload"])
+    snapshot = await resolve_policy(session, o, me.owner_user_id)
+    await ensure_fits_plan(session, o, snapshot)
+    now = clock.now()
+    revised = (
+        await session.execute(
+            _REVISE,
+            {
+                "o": o,
+                "r": r,
+                "v": req["version"],
+                "title": new["title"],
+                "description": new["description"],
+                "action_type": new["action_type"],
+                "payload": payload_json,
+                "risk": declared.name.lower(),
+                "effective": effective_risk(
+                    declared, new["action_type"], snapshot["risk_floors"]
+                ).name.lower(),
+                "hash": digest,
+                "snapshot": json.dumps(snapshot),
+                "now": now,
+                "deadline": now + timedelta(minutes=snapshot["voting_timeout_minutes"]),
+            },
+        )
+    ).scalar_one()
+    await session.execute(_SUPERSEDE, {"o": o, "r": r})
+    if old_status is not new_status:
+        await change_status(
+            session, o, r, revised, old_status, new_status, now, None, "agent", me.id
+        )
+    await post_system_message(session, o, r, revised, _diff_body(revised, old, new, fields))
+    data = {
+        "fields": fields,
+        "from_version": req["version"],
+        "version": revised,
+        "from_status": old_status.value,
+    }
+    await audit.record(session, o, "decision_request", r, "revised", "agent", me.id, data)
+    await outbox.emit(session, o, "decision.revised", data | {"id": str(r)})
+    return {"id": r, "version": revised, "status": new_status.value, "fields": fields}
+
+
+async def withdraw_decision(
+    session: AsyncSession,
+    organization_id: uuid.UUID,
+    clock: Clock,
+    *,
+    decision_request_id: uuid.UUID,
+    agent_session_id: uuid.UUID | None = None,
+    user_id: uuid.UUID | None = None,
+) -> dict[str, Any]:
+    """The original agent identity, or an org_admin, cancels a request that is not yet decided."""
+    o, r = organization_id, decision_request_id
+    req = (await session.execute(_REQUEST_FOR_UPDATE, {"o": o, "r": r})).mappings().first()
+    if req is None:
+        raise NotFoundError
+    if agent_session_id is not None and user_id is None:
+        actor_type, actor_id = (
+            "agent",
+            (await _requester_identity(session, o, agent_session_id, req)).id,
+        )
+    elif user_id is not None and agent_session_id is None:
+        role = (await session.execute(_ROLE, {"o": o, "u": user_id})).scalar()
+        if role is None:
+            raise NotFoundError
+        if role != "org_admin":
+            raise Forbidden("only an org_admin or the requesting agent may withdraw")
+        actor_type, actor_id = "user", user_id
+    else:
+        raise InvalidInput("exactly one of agent_session_id and user_id is required")
+    old = Status(req["status"])
+    new = transition(old, Event.WITHDRAW)  # a decided request is a 409
+    await session.execute(_SUPERSEDE, {"o": o, "r": r})  # an open step must not outlive its request
+    await change_status(
+        session, o, r, req["version"], old, new, clock.now(), None, actor_type, actor_id
+    )
+    return {"id": r, "status": new.value}

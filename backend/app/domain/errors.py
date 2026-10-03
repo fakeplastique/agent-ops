@@ -53,3 +53,11 @@ class Forbidden(DomainError):
 
 class StepNotPending(DomainError):
     code = "step_not_pending"
+
+
+class DiscussionClosed(DomainError):
+    code = "discussion_closed"
+
+
+class DiscussionRequired(DomainError):
+    code = "discussion_required"

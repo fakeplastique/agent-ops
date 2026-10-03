@@ -3,6 +3,7 @@ from sqlalchemy import text
 
 from app.domain.errors import (
     AlreadyVoted,
+    DiscussionRequired,
     InvalidInput,
     NotFoundError,
     RoundClosed,
@@ -177,7 +178,7 @@ async def test_round_outcomes_go_through_the_one_rule(
     assert (decided_at is not None) == (final in ("approved", "rejected"))
 
 
-async def test_split_with_two_rounds_goes_to_discussion_and_votes_are_closed_until_s11(
+async def test_split_with_two_rounds_goes_to_discussion_and_round_two_needs_a_message(
     app_engine, owner_engine
 ):
     w = await make_world(owner_engine, rounds=2, floors=LOW)
@@ -188,7 +189,7 @@ async def test_split_with_two_rounds_goes_to_discussion_and_votes_are_closed_unt
     for s, v in ((a, "approve"), (b, "approve"), (c_, "reject")):
         await cast(app_engine, w, req, s, v)
     assert (await row(owner_engine, req))[0] == "pending_discussion"
-    with pytest.raises(RoundClosed):  # round 2 opens with S11's discussion gate
+    with pytest.raises(DiscussionRequired):  # round 2 follows a discussion (S11)
         await cast(app_engine, w, req, late)
 
 

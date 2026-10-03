@@ -272,3 +272,44 @@ async def decide(
             s, w.org, clock, keys=KEYS, who=who, step_id=step_id, request_version=version,
             approve=approve, comment=comment,
         )  # fmt: skip
+
+
+async def revise(engine, w, req, session=None, clock=NOW, **fields) -> dict:
+    from app.db.session import tenant_session
+    from app.services.decisions import revise_decision
+
+    async with tenant_session(engine, w.org) as s:
+        return await revise_decision(
+            s,
+            w.org,
+            clock,
+            decision_request_id=req["id"],
+            agent_session_id=session or w.session,
+            **fields,
+        )
+
+
+async def withdraw(engine, w, req, *, session=None, user=None, clock=NOW) -> dict:
+    from app.db.session import tenant_session
+    from app.services.decisions import withdraw_decision
+
+    async with tenant_session(engine, w.org) as s:
+        return await withdraw_decision(
+            s, w.org, clock, decision_request_id=req["id"], agent_session_id=session, user_id=user
+        )
+
+
+async def post(engine, w, req, body="hello", *, session=None, user=None, clock=NOW) -> dict:
+    from app.db.session import tenant_session
+    from app.services.messages import post_message
+
+    async with tenant_session(engine, w.org) as s:
+        return await post_message(
+            s,
+            w.org,
+            clock,
+            decision_request_id=req["id"],
+            body=body,
+            agent_session_id=session,
+            user_id=user,
+        )
