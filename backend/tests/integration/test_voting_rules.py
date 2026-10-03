@@ -271,3 +271,35 @@ async def test_a_vote_at_or_after_the_deadline_cannot_close_the_round(app_engine
         len(await fetch(owner_engine, "select 1 from votes where organization_id=:o", o=w.org)) == 1
     )
     assert (await row(owner_engine, req))[0] == "pending_votes"
+
+
+async def test_a_revoked_identitys_earlier_vote_no_longer_counts_toward_the_round(
+    app_engine, owner_engine
+):
+    # catches: a compromised agent revoked mid-round still helping to auto-approve
+    w = await make_world(owner_engine, floors=LOW, quorum=2)
+    req = await open_request(app_engine, w)
+    (ident_a, a), (_, b), (_, c) = [await add_agent(owner_engine, w) for _ in range(3)]
+    await cast(app_engine, w, req, a)
+    async with owner_engine.begin() as conn:
+        await conn.execute(
+            text("update agent_identities set status='revoked' where id=:i"), {"i": ident_a}
+        )
+    out = await cast(app_engine, w, req, b)
+    assert (out["cast"], out["status"]) == (1, "pending_votes")  # A's vote is ignored: 1 valid of 2
+    from app.db.session import tenant_session
+    from app.services.votes import visible_votes
+
+    async with tenant_session(
+        app_engine, w.org
+    ) as sess:  # the displayed count agrees with the tally
+        assert (await visible_votes(sess, w.org, req["id"], viewer_session_id=None))["cast"] == 1
+    assert (await row(owner_engine, req))[0] == "pending_votes"
+    out = await cast(app_engine, w, req, c)
+    assert (out["cast"], out["status"]) == (2, "approved")
+    revealed = await fetch(
+        owner_engine,
+        "select payload from outbox_events where type='round.revealed' and organization_id=:o",
+        o=w.org,
+    )
+    assert len(revealed[0][0]["votes"]) == 2  # the revoked vote is not in the tally

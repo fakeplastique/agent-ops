@@ -176,10 +176,14 @@ _VOTER = text(
 _IDENTITY_OF = text(
     "select agent_identity_id from agent_sessions where organization_id = :o and id = :s"
 )
+# A vote counts only while its identity is active (I6): a revoked agent's earlier vote is ignored.
+# The same-session / same-identity flags look at every vote, so a revoked agent cannot vote twice either.
 _ROUND_STATE = text(
-    "select count(*) as n, coalesce(bool_or(v.session_id = :s), false) as same_session,"
+    "select count(*) filter (where i.status = 'active') as n,"
+    " coalesce(bool_or(v.session_id = :s), false) as same_session,"
     " coalesce(bool_or(a.agent_identity_id = :i), false) as same_identity from votes v"
     " join agent_sessions a on a.organization_id = v.organization_id and a.id = v.session_id"
+    " join agent_identities i on i.organization_id = a.organization_id and i.id = a.agent_identity_id"
     " where v.organization_id = :o and v.decision_request_id = :r"
     " and v.request_version = :ver and v.round = :rd"
 )
@@ -189,8 +193,11 @@ _INSERT_VOTE = text(
     " returning id"
 )
 _ROUND_VOTES = text(
-    "select session_id, verdict, confidence, round from votes where organization_id = :o"
-    " and decision_request_id = :r and request_version = :ver and round = :rd order by created_at, id"
+    "select v.session_id, v.verdict, v.confidence, v.round from votes v"
+    " join agent_sessions a on a.organization_id = v.organization_id and a.id = v.session_id"
+    " join agent_identities i on i.organization_id = a.organization_id and i.id = a.agent_identity_id"
+    " where v.organization_id = :o and v.decision_request_id = :r and v.request_version = :ver"
+    " and v.round = :rd and i.status = 'active' order by v.created_at, v.id"
 )
 _REVEAL = text(
     "update votes set revealed_at = :now where organization_id = :o and decision_request_id = :r"

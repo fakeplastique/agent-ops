@@ -167,3 +167,30 @@ async def test_closing_the_round_stamps_every_round_one_vote_revealed(app_engine
     assert (await fetch(owner_engine, q, o=w.org))[0][0] == 0
     await cast(app_engine, w, req, c)
     assert (await fetch(owner_engine, q, o=w.org))[0][0] == 3
+
+
+async def test_a_version_bump_does_not_reveal_or_get_revealed_with_the_old_votes(
+    app_engine, owner_engine
+):
+    # catches: the reveal stamp (or visibility) ignoring the version: S11's revise would unmask old blind votes
+    w = await make_world(owner_engine)
+    req = await open_request(app_engine, w)
+    old_a, old_b, new_a, new_b, new_c = await voters(owner_engine, w, 5)
+    await cast(app_engine, w, req, old_a, "reject", 0.21, rationale=SECRET)
+    await cast(app_engine, w, req, old_b, "reject", 0.22, rationale=SECRET)
+    async with owner_engine.begin() as conn:  # what S11's revise will do
+        await conn.execute(
+            text("update decision_requests set version = 2 where id=:r"), {"r": req["id"]}
+        )
+    for s in (new_a, new_b, new_c):
+        await cast(app_engine, w, req, s, "approve", request_version=2)
+    stamped = await fetch(
+        owner_engine,
+        "select request_version, count(revealed_at), count(*) from votes where organization_id=:o group by 1 order by 1",
+        o=w.org,
+    )
+    assert stamped == [(1, 0, 2), (2, 3, 3)]
+    out = await view(app_engine, w, req, None)
+    assert {v["request_version"] for v in out["votes"]} == {2} and SECRET not in json.dumps(
+        out, default=str
+    )
