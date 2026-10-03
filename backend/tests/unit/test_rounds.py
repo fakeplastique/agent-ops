@@ -96,3 +96,35 @@ def test_unknown_action_type_floors_at_medium_and_never_lowers_declared():
 def test_garbage_floor_value_fails_closed():
     with pytest.raises(InvalidInput):
         effective_risk(Risk.LOW, "x", {"x": "lowest"})
+
+
+@pytest.mark.parametrize("bad", [True, False, 1.0, 0, 4, None, "hıgh", "HIGH", " low", [], {}])
+def test_risk_must_be_an_exact_level(bad):
+    # catches: bool/float quietly becoming LOW (auto-approvable), non-ASCII look-alikes mapping to a level
+    with pytest.raises(InvalidInput):
+        Risk.of(bad)
+    assert Risk.of("high") is Risk.HIGH
+    assert Risk.of(2) is Risk.MEDIUM
+    assert Risk.of(Risk.LOW) is Risk.LOW
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"quorum": True},
+        {"quorum": 0},
+        {"rounds": 3},
+        {"rounds": True},
+        {"round_no": True},
+        {"round_no": "1"},
+    ],
+)
+def test_round_parameters_are_validated(kwargs):
+    with pytest.raises(InvalidInput):  # catches: quorum_size=True auto-approving on one vote
+        outcome(votes(A), **kwargs)
+
+
+def test_vote_round_must_be_a_positive_int():
+    for bad in (True, "1", 0, -1, 1.0):
+        with pytest.raises(InvalidInput):
+            Vote(A, 0.9, bad)  # type: ignore[arg-type]

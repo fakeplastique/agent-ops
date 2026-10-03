@@ -24,8 +24,13 @@ def loads_strict(raw: str | bytes) -> Any:
     """Parse JSON, rejecting duplicate keys, NaN and Infinity."""
     try:
         return json.loads(raw, object_pairs_hook=_no_duplicates, parse_constant=_no_constant)
-    except json.JSONDecodeError as e:
-        raise InvalidInput(f"invalid JSON: {e.msg}") from None
+    except InvalidInput:
+        raise
+    except (
+        ValueError,
+        RecursionError,
+    ) as e:  # bad syntax or bytes, 4300+ digit ints, absurd nesting
+        raise InvalidInput(f"invalid JSON: {type(e).__name__}") from None
 
 
 def _normalise(value: Any) -> Any:
@@ -46,21 +51,25 @@ def _normalise(value: Any) -> Any:
 
 def canonical_json(value: Any) -> bytes:
     """Sorted keys, no whitespace, UTF-8; the exact bytes that get hashed and signed."""
-    text = json.dumps(
-        _normalise(value),
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-        allow_nan=False,
-    )
     try:
+        text = json.dumps(
+            _normalise(value),
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        )
         return text.encode("utf-8")
-    except UnicodeEncodeError:
-        raise InvalidInput("string is not valid unicode") from None
+    except InvalidInput:
+        raise
+    except (ValueError, RecursionError) as e:  # lone surrogates, huge ints, absurd nesting
+        raise InvalidInput(f"cannot canonicalise: {type(e).__name__}") from None
 
 
 def content_hash(title: str, action_type: str, payload: Any, declared_risk: Risk) -> str:
     """SHA-256 over title, action type, payload and the DECLARED risk (a floor change must not void receipts)."""
+    if not isinstance(title, str) or not isinstance(action_type, str):
+        raise InvalidInput("title and action_type must be strings")
     doc = {
         "title": title,
         "action_type": action_type,

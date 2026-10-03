@@ -31,8 +31,17 @@ class Risk(IntEnum):
 
     @classmethod
     def of(cls, value: Any) -> "Risk":
-        """Coerce a Risk, its name ('low') or its int; anything else fails closed."""
-        try:
-            return cls[value.upper()] if isinstance(value, str) else cls(value)
-        except (KeyError, ValueError):
-            raise InvalidInput(f"unknown risk level {value!r}") from None
+        """Coerce a Risk, its exact lowercase name or its int. Bool, float and look-alikes fail closed."""
+        if isinstance(value, cls):
+            return value
+        if isinstance(value, str):
+            level = {r.name.lower(): r for r in cls}.get(value)
+        else:
+            level = (
+                None
+                if isinstance(value, bool) or not isinstance(value, int)
+                else cls._value2member_map_.get(value)
+            )
+        if level is None:
+            raise InvalidInput(f"unknown risk level {value!r}")
+        return level  # type: ignore[return-value]

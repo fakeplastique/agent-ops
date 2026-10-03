@@ -14,6 +14,14 @@ def _check_confidence(value: Any) -> float:
     return float(value)
 
 
+def _check_int(name: str, value: Any, allowed: tuple[int, ...] | None = None) -> int:
+    # bool is an int subclass: True would pass as quorum 1 or round 1.
+    ok = isinstance(value, int) and not isinstance(value, bool)
+    if not ok or (value not in allowed if allowed else value < 1):
+        raise InvalidInput(f"{name} is invalid: {value!r}")
+    return value
+
+
 @dataclass(frozen=True)
 class Vote:
     verdict: Verdict
@@ -23,6 +31,7 @@ class Vote:
     def __post_init__(self) -> None:
         object.__setattr__(self, "verdict", Verdict(self.verdict))
         object.__setattr__(self, "confidence", _check_confidence(self.confidence))
+        _check_int("round", self.round)
 
 
 def round_outcome(
@@ -36,8 +45,9 @@ def round_outcome(
 ) -> Event | None:
     """Event for a complete round (None while open). Callers pass valid votes of this version only."""
     threshold = _check_confidence(threshold)
-    if quorum_size < 1:
-        raise InvalidInput("quorum_size must be at least 1")
+    _check_int("quorum_size", quorum_size)
+    _check_int("rounds", rounds, (1, 2))
+    _check_int("round_no", round_no, (1, 2))
     current = [v for v in votes if v.round == round_no]  # round 2 never sees round-1 votes
     if len(current) < quorum_size:
         return None
