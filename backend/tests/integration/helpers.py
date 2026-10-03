@@ -186,7 +186,7 @@ async def open_request(engine, w: "World", clock=NOW, **over) -> dict:
 
 
 async def cast(
-    engine, w: "World", req: dict, session, verdict="approve", confidence=0.9, **over
+    engine, w: "World", req: dict, session, verdict="approve", confidence=0.9, clock=NOW, **over
 ) -> dict:
     from app.db.session import tenant_session
     from app.services.decisions import cast_vote
@@ -201,7 +201,7 @@ async def cast(
         "rationale": "because",
     } | over
     async with tenant_session(engine, w.org) as s:
-        return await cast_vote(s, w.org, NOW, **kw)
+        return await cast_vote(s, w.org, clock, **kw)
 
 
 async def voters(owner, w: "World", n: int) -> list[uuid.UUID]:

@@ -1,6 +1,7 @@
 import json
 
 import pytest
+from sqlalchemy import text
 
 from app.db.session import tenant_session
 from app.services.votes import visible_votes
@@ -132,3 +133,37 @@ async def test_rationale_never_appears_in_any_event_or_audit_row(app_engine, own
             owner_engine, f"select {col}::text from {table} where organization_id=:o", o=w.org
         )
         assert all(SECRET not in r[0] for r in rows), table
+
+
+@pytest.mark.parametrize("status", ["cancelled", "expired"])
+async def test_leaving_pending_votes_without_closing_the_round_reveals_nothing(
+    app_engine, owner_engine, status
+):
+    # catches: withdrawing mid-round unmasking the blind votes (the requester could read them)
+    w = await make_world(owner_engine)
+    req = await open_request(app_engine, w)
+    a, b, _ = await voters(owner_engine, w, 3)
+    await cast(app_engine, w, req, a, "reject", 0.31, rationale=SECRET)
+    async with owner_engine.begin() as c:
+        await c.execute(text("alter table decision_requests disable trigger decision_status_guard"))
+        await c.execute(
+            text("update decision_requests set status=:s where id=:r"),
+            {"s": status, "r": req["id"]},
+        )
+        await c.execute(text("alter table decision_requests enable trigger decision_status_guard"))
+    for viewer in (b, None, w.session):
+        out = await view(app_engine, w, req, viewer)
+        assert out["votes"] == [] and out["cast"] == 1, (status, viewer)
+    assert [v["session_id"] for v in (await view(app_engine, w, req, a))["votes"]] == [a]
+
+
+async def test_closing_the_round_stamps_every_round_one_vote_revealed(app_engine, owner_engine):
+    w = await make_world(owner_engine)
+    req = await open_request(app_engine, w)
+    a, b, c = await voters(owner_engine, w, 3)
+    for s in (a, b):
+        await cast(app_engine, w, req, s)
+    q = "select count(revealed_at) from votes where organization_id=:o"
+    assert (await fetch(owner_engine, q, o=w.org))[0][0] == 0
+    await cast(app_engine, w, req, c)
+    assert (await fetch(owner_engine, q, o=w.org))[0][0] == 3

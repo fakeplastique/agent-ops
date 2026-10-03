@@ -249,3 +249,25 @@ async def test_other_tenants_request_and_session_are_not_found(app_engine, owner
         )
         == []
     )
+
+
+async def test_a_vote_at_or_after_the_deadline_cannot_close_the_round(app_engine, owner_engine):
+    # Rule 7: past the deadline the request escalates to humans and never auto-approves.
+    from datetime import timedelta
+
+    from .helpers import NOW, FakeClock
+
+    w = await make_world(owner_engine, floors=LOW, timeout=30)
+    req = await open_request(app_engine, w)
+    a, b, _ = await voters(owner_engine, w, 3)
+    deadline = req["voting_deadline_at"]
+    just_before = FakeClock(deadline - timedelta(seconds=1))
+    await cast(app_engine, w, req, a, clock=just_before)
+    for late in (FakeClock(deadline), FakeClock(deadline + timedelta(hours=5))):
+        with pytest.raises(RoundClosed):  # catches: a late closing vote auto-approving
+            await cast(app_engine, w, req, b, clock=late)
+    assert NOW.now() < deadline
+    assert (
+        len(await fetch(owner_engine, "select 1 from votes where organization_id=:o", o=w.org)) == 1
+    )
+    assert (await row(owner_engine, req))[0] == "pending_votes"

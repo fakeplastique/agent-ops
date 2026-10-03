@@ -166,7 +166,7 @@ async def create_decision(
 
 _LOCK = text(
     "select id, status, version, content_hash, effective_risk_level, requested_by_session_id,"
-    " policy_snapshot from decision_requests where organization_id = :o and id = :r for update"
+    " policy_snapshot, voting_deadline_at from decision_requests where organization_id = :o and id = :r for update"
 )
 _VOTER = text(
     "select s.agent_identity_id, i.status from agent_sessions s"
@@ -192,6 +192,10 @@ _ROUND_VOTES = text(
     "select session_id, verdict, confidence, round from votes where organization_id = :o"
     " and decision_request_id = :r and request_version = :ver and round = :rd order by created_at, id"
 )
+_REVEAL = text(
+    "update votes set revealed_at = :now where organization_id = :o and decision_request_id = :r"
+    " and request_version = :ver and round = 1"
+)
 _SET_STATUS = text(
     "update decision_requests set status = :new, updated_at = :now, decided_at = :decided,"
     " receipt = cast(:receipt as jsonb) where organization_id = :o and id = :r and status = :old"
@@ -212,7 +216,7 @@ def _checked_vote(verdict: Any, confidence: Any, rationale: Any, request_version
     except InvalidInput:
         raise
     except ValueError:
-        raise InvalidInput(f"unknown verdict {verdict!r}") from None
+        raise InvalidInput(f"unknown verdict {str(verdict)[:20]!r}") from None
 
 
 async def cast_vote(
@@ -240,6 +244,10 @@ async def cast_vote(
     if request_version != req["version"]:
         raise StaleVersion
     if req["status"] != "pending_votes":  # round 2 opens with S11's discussion gate
+        raise RoundClosed
+    if (
+        clock.now() >= req["voting_deadline_at"]
+    ):  # rule 7: past the deadline humans take over, never auto-approve
         raise RoundClosed
     snapshot = req["policy_snapshot"]
     quorum = snapshot["quorum_size"]
@@ -325,6 +333,7 @@ async def _close_round(
     )  # fmt: skip
     if result.first() is None:  # the lock makes this unreachable; never double-apply if it is not
         raise IllegalTransitionError("the request changed under the vote")
+    await session.execute(_REVEAL, {"o": o, "r": r, "ver": version, "now": now})
     revealed = {
         "decision_request_id": str(r), "round": 1, "request_version": version,
         "votes": [{"session_id": str(v.session_id), "verdict": v.verdict, "confidence": v.confidence} for v in rows],

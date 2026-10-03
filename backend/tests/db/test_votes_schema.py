@@ -10,6 +10,12 @@ from tests.integration.helpers import make_world, open_request, voters
 
 pytestmark = pytest.mark.anyio
 
+# The receipt moves with the status, so only the trigger (not the receipt CHECK) is under test.
+SET_STATUS = (
+    "update decision_requests set status=:s, receipt = case when :s = 'approved'"
+    ' then cast(\'{"sig": "x"}\' as jsonb) end where id=:r'
+)
+
 
 async def refused(owner, sql, **p) -> bool:
     try:
@@ -36,7 +42,7 @@ async def test_status_guard_allows_exactly_the_transition_table(app_engine, owne
                     text("alter table decision_requests disable trigger decision_status_guard")
                 )
                 await c.execute(
-                    text("update decision_requests set status=:s where id=:r"),
+                    text(SET_STATUS),
                     {"s": old.value, "r": req["id"]},
                 )
                 await c.execute(
@@ -44,7 +50,7 @@ async def test_status_guard_allows_exactly_the_transition_table(app_engine, owne
                 )
             bad = await refused(
                 owner_engine,
-                "update decision_requests set status=:s where id=:r",
+                SET_STATUS,
                 s=new.value,
                 r=req["id"],
             )
@@ -102,3 +108,16 @@ async def test_votes_cannot_cross_tenants_or_be_edited(app_engine, owner_engine)
         owner_engine, sql, o=b.org, r=req["id"], s=va
     )  # composite FK: request is A's
     assert await refused(owner_engine, sql, o=a.org, r=req["id"], s=uuid.uuid4())  # unknown session
+
+
+async def test_receipt_and_approved_status_go_together(app_engine, owner_engine):
+    w = await make_world(owner_engine)
+    req = await open_request(app_engine, w)
+    forged = 'update decision_requests set receipt = cast(\'{"sig": "x"}\' as jsonb) where id=:r'
+    assert await refused(
+        owner_engine, forged, r=req["id"]
+    )  # catches: a receipt on a pending request
+    approve = "update decision_requests set status='approved' where id=:r"
+    assert await refused(owner_engine, approve, r=req["id"])  # approved without a receipt
+    both = "update decision_requests set status='approved', receipt = cast('{\"sig\": \"x\"}' as jsonb) where id=:r"
+    assert not await refused(owner_engine, both, r=req["id"])
