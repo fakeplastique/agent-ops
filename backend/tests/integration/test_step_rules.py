@@ -366,3 +366,21 @@ async def test_a_replay_has_the_same_shape_as_the_first_answer(app_engine, owner
     first = await decide(app_engine, w, step, user, "manager")
     again = await decide(app_engine, w, step, user, "manager")
     assert set(first) == set(again) and again["replayed"] and not first["replayed"]
+
+
+async def test_a_removed_user_gets_nothing_not_even_a_replay(app_engine, owner_engine):
+    w, req, _ = await approval_world(
+        owner_engine, app_engine, levels=[{"role": "manager", "timeout_minutes": 60}]
+    )
+    step, *_ = await pending_step(owner_engine, req)
+    user = await staff(owner_engine, w.org, "manager")
+    await decide(app_engine, w, step, user, "manager")
+    async with owner_engine.begin() as c:  # removed from the organization afterwards
+        await c.execute(
+            text("delete from memberships where organization_id=:o and user_id=:u"),
+            {"o": w.org, "u": user},
+        )
+    with pytest.raises(
+        NotFoundError
+    ):  # catches: replaying a decision (and the request status) to a non-member
+        await decide(app_engine, w, step, user, "manager")

@@ -125,6 +125,11 @@ async def decide_step(
     )  # fresh, under the lock
     decision = Status.APPROVED if approve else Status.REJECTED
 
+    # Membership first: a user who is no longer in the organization gets nothing, not even a replay.
+    member = (await session.execute(_MEMBER, {"o": o, "u": who.user_id})).first()
+    if member is None:
+        raise NotFoundError
+
     if step["status"] in ("approved", "rejected") and step["approver_user_id"] == who.user_id:
         if step["status"] != decision.value:
             raise AlreadyDecided  # a retry may repeat a decision, not reverse it
@@ -144,9 +149,6 @@ async def decide_step(
     if step["status"] != "pending" or req["status"] != Status.PENDING_APPROVAL.value:
         raise StepNotPending
 
-    member = (await session.execute(_MEMBER, {"o": o, "u": who.user_id})).first()
-    if member is None:
-        raise NotFoundError
     role, team_id = _role(member.role), member.team_id
     fresh = UserPrincipal(who.user_id, o, role)  # the claimed role in `who` is never trusted
     snapshot = req["policy_snapshot"]

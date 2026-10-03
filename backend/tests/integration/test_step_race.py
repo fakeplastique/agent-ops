@@ -1,6 +1,8 @@
 import asyncio
 
 import pytest
+from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
 
 from app.domain.errors import StepNotPending
 
@@ -85,3 +87,34 @@ async def test_a_late_second_decider_on_a_decided_step_is_409(app_engine, owner_
     await decide(app_engine, w, step, await staff(owner_engine, w.org, "manager"))
     with pytest.raises(StepNotPending):
         await decide(app_engine, w, step, await staff(owner_engine, w.org, "org_admin"))
+
+
+async def test_decide_holds_the_request_row_lock_before_it_touches_the_step(
+    app_engine, owner_engine
+):
+    """The one lock order (request row first, then steps) that S12's timeout job must share.
+
+    Another transaction holds the STEP row; decide must already own the REQUEST row while it waits."""
+    w, req, _ = await approval_world(
+        owner_engine, app_engine, levels=[{"role": "manager", "timeout_minutes": 60}]
+    )
+    step, *_ = await pending_step(owner_engine, req)
+    user = await staff(owner_engine, w.org, "manager")
+    async with owner_engine.connect() as holder:
+        tx = await holder.begin()
+        await holder.execute(
+            text("select 1 from approval_steps where id=:s for update"), {"s": step}
+        )
+        task = asyncio.create_task(decide(app_engine, w, step, user, "manager"))
+        done, _ = await asyncio.wait({task}, timeout=1.0)
+        assert not done  # blocked on the step row
+        async with owner_engine.connect() as probe:
+            with pytest.raises(
+                DBAPIError
+            ):  # catches: deciding without taking the request lock first
+                await probe.execute(
+                    text("select 1 from decision_requests where id=:r for update nowait"),
+                    {"r": req["id"]},
+                )
+        await tx.commit()
+    assert (await asyncio.wait_for(task, 10))["request_status"] == "approved"
