@@ -22,9 +22,9 @@ def probe_app() -> FastAPI:
     async def probe() -> dict[str, str]:
         return {"ok": "yes"}
 
-    from app.api.errors import install
+    from app.api.errors import register_error_handlers
 
-    install(app)
+    register_error_handlers(app)
     return app
 
 
