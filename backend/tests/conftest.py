@@ -1,4 +1,5 @@
 import asyncio
+import os
 import uuid
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -13,7 +14,7 @@ from app.config import settings
 from app.db.migrate import upgrade
 
 ROLES_SQL = Path(__file__).parents[2] / "scripts" / "db_roles.sql"
-TEST_DB = "agent_ops_test"
+TEST_DB = os.environ.get("TEST_DB_NAME", "agent_ops_test")  # a parallel session can use its own
 
 
 def _urls() -> tuple[URL, URL]:

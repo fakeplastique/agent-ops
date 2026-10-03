@@ -24,6 +24,13 @@ ARGS = {
 }
 
 
+def _deep(n: int):
+    out: list = []
+    for _ in range(n):
+        out = [out]
+    return out
+
+
 async def create(engine, w, clock=NOW, **over):
     kw = {"agent_session_id": w.session} | ARGS | over
     async with tenant_session(engine, w.org) as s:
@@ -216,6 +223,12 @@ async def test_revoked_agent_cannot_create(app_engine, owner_engine):
         {"payload": {"k": "a\x00b"}},
         {"payload": {"a\x00": 1}},
         {"payload": {"n": float("nan")}},
+        {"description": "\ud800"},  # lone surrogate: asyncpg would raise a 500
+        {
+            "payload": {"deep": _deep(5000)}
+        },  # past the recursion limit: InvalidInput, not RecursionError
+        # 59 KB canonical, 71 KB as stored jsonb text: the app and the CHECK must agree.
+        {"payload": {f"k{i}": 0 for i in range(6000)}},
     ],
 )
 async def test_invalid_input_is_rejected_before_anything_is_written(app_engine, owner_engine, bad):

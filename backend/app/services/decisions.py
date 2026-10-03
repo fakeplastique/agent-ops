@@ -23,6 +23,8 @@ _AGENT = text(
     " where s.organization_id = :o and s.id = :s and i.status = 'active'"
 )
 _MEMBER = text("select 1 from memberships where organization_id = :o and user_id = :u")
+# What the CHECK on decision_requests.payload measures: jsonb's own text form, not canonical JSON.
+_STORED_SIZE = text("select octet_length(cast(:p as jsonb)::text)")
 _INSERT = text(
     "insert into decision_requests (organization_id, title, description, action_type, payload,"
     " risk_level, effective_risk_level, content_hash, requested_by_session_id, requested_by_user_id,"
@@ -33,18 +35,29 @@ _INSERT = text(
 
 
 def _has_nul(value: Any) -> bool:
-    # Postgres text and jsonb cannot hold U+0000; refuse it here instead of failing as a 500.
-    if isinstance(value, str):
-        return "\x00" in value
-    if isinstance(value, list):
-        return any(_has_nul(v) for v in value)
-    if isinstance(value, dict):
-        return any(_has_nul(k) or _has_nul(v) for k, v in value.items())
+    # Postgres text and jsonb cannot hold U+0000. Iterative: a deep payload must not hit the recursion limit.
+    stack = [value]
+    while stack:
+        v = stack.pop()
+        if isinstance(v, str):
+            if "\x00" in v:
+                return True
+        elif isinstance(v, list):
+            stack.extend(v)
+        elif isinstance(v, dict):
+            stack.extend(v)
+            stack.extend(v.values())
     return False
 
 
 def _check_text(name: str, value: Any, low: int, high: int) -> None:
-    if not isinstance(value, str) or not low <= len(value) <= high or "\x00" in value:
+    ok = isinstance(value, str) and low <= len(value) <= high and "\x00" not in value
+    if ok:
+        try:
+            value.encode("utf-8")  # a lone surrogate would reach asyncpg and fail as a 500
+        except UnicodeEncodeError:
+            ok = False
+    if not ok:
         raise InvalidInput(f"{name} must be a string of {low} to {high} characters")
 
 
@@ -73,25 +86,28 @@ async def create_decision(
     user_id: uuid.UUID | None = None,
 ) -> dict[str, Any]:
     """Create a request in `pending_votes`. One transaction: a later failure also undoes the usage count."""
-    if (agent_session_id is None) == (user_id is None):
-        raise InvalidInput("exactly one of agent_session_id and user_id is required")
     _validate(title, description, action_type, payload)
     declared = Risk.of(risk_level)
     # Also rejects NaN and lone surrogates; hashes the DECLARED risk (a floor change must not void receipts).
     digest = content_hash(title, action_type, payload, declared)
 
-    if agent_session_id is not None:
+    payload_json = json.dumps(payload, allow_nan=False)
+    if (await session.scalar(_STORED_SIZE, {"p": payload_json})) > PAYLOAD_MAX:
+        raise InvalidInput(f"payload exceeds {PAYLOAD_MAX} bytes")
+
+    if agent_session_id is not None and user_id is None:
         agent = (
             await session.execute(_AGENT, {"o": organization_id, "s": agent_session_id})
         ).first()
         if agent is None:  # unknown, another tenant's, or revoked: indistinguishable
             raise NotFoundError
         actor_type, actor_id, owner = "agent", agent.id, agent.owner_user_id
-    else:
-        assert user_id is not None  # exactly one requester was checked above
+    elif user_id is not None and agent_session_id is None:
         if (await session.execute(_MEMBER, {"o": organization_id, "u": user_id})).first() is None:
             raise NotFoundError
         actor_type, actor_id, owner = "user", user_id, user_id
+    else:
+        raise InvalidInput("exactly one of agent_session_id and user_id is required")
 
     await consume(session, organization_id, "requests", clock)  # PlanLimitReached -> 402
     snapshot = await resolve_policy(session, organization_id, owner)
@@ -106,7 +122,7 @@ async def create_decision(
                     "title": title,
                     "description": description,
                     "action_type": action_type,
-                    "payload": json.dumps(payload, allow_nan=False),
+                    "payload": payload_json,
                     "risk": declared.name.lower(),
                     "effective": effective.name.lower(),
                     "hash": digest,

@@ -191,6 +191,12 @@ def upgrade() -> None:
             "(requested_by_session_id IS NOT NULL) <> (requested_by_user_id IS NOT NULL)",
             name="decision_one_requester",
         ),
+        # A floor can raise the risk, never lower it (I7), even for a row written around the service.
+        sa.CheckConstraint(
+            "array_position(ARRAY['low','medium','high'], effective_risk_level)"
+            " >= array_position(ARRAY['low','medium','high'], risk_level)",
+            name="decision_effective_ge_declared",
+        ),
     )
     op.create_index(
         "decision_requests_list_idx",
@@ -206,8 +212,18 @@ def upgrade() -> None:
 
     for table in ("teams", "memberships", "agent_identities", "escalation_policies"):
         _rls(table)
-    _rls("agent_sessions", "SELECT, INSERT, UPDATE")
-    _rls("decision_requests", "SELECT, INSERT")
+    _rls("agent_sessions", "SELECT, INSERT")
+    op.execute(
+        "GRANT UPDATE (last_seen_at) ON agent_sessions TO app_rt"
+    )  # a session never changes agent
+    _rls("decision_requests", "SELECT")
+    # Column-level INSERT: status, version, receipt, decided_at and escalation_reason keep their defaults,
+    # so a request cannot be written already approved or with a forged receipt. S9 adds the UPDATEs.
+    op.execute(
+        "GRANT INSERT (organization_id, title, description, action_type, payload, risk_level,"
+        " effective_risk_level, content_hash, requested_by_session_id, requested_by_user_id,"
+        " policy_snapshot, voting_deadline_at) ON decision_requests TO app_rt"
+    )
     # users are not tenant-owned: a tenant sees only its own members (S15 adds the login lookup).
     op.execute("ALTER TABLE users ENABLE ROW LEVEL SECURITY")
     op.execute("ALTER TABLE users FORCE ROW LEVEL SECURITY")
