@@ -9,3 +9,11 @@ class NotFoundError(DomainError):
 
 class PlanLimitReached(DomainError):
     code = "plan_limit_reached"
+
+
+class InvalidInput(DomainError, ValueError):
+    code = "invalid_input"
+
+
+class IllegalTransitionError(DomainError):
+    code = "illegal_transition"
