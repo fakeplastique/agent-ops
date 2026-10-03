@@ -6,10 +6,21 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domain.errors import InvalidInput, NotFoundError
+from app.domain.errors import (
+    AlreadyVoted,
+    IllegalTransitionError,
+    InvalidInput,
+    NotFoundError,
+    RoundClosed,
+    StaleVersion,
+    VoteNotAllowed,
+)
 from app.domain.hashing import canonical_json, content_hash
+from app.domain.receipt import KeyRing, Subject, sign
 from app.domain.risk import ACTION_TYPE, effective_risk
-from app.domain.statuses import Risk
+from app.domain.rounds import Vote, round_outcome
+from app.domain.statuses import Risk, Status
+from app.domain.transitions import transition
 from app.ports.clock import Clock
 from app.services import audit, outbox
 from app.services.policies import ensure_fits_plan, resolve_policy
@@ -151,3 +162,203 @@ async def create_decision(
         summary | {"id": str(decision["id"]), "action_type": action_type},
     )  # fmt: skip
     return decision
+
+
+_LOCK = text(
+    "select id, status, version, content_hash, effective_risk_level, requested_by_session_id,"
+    " policy_snapshot, voting_deadline_at from decision_requests where organization_id = :o and id = :r for update"
+)
+_VOTER = text(
+    "select s.agent_identity_id, i.status from agent_sessions s"
+    " join agent_identities i on i.organization_id = s.organization_id and i.id = s.agent_identity_id"
+    " where s.organization_id = :o and s.id = :s"
+)
+_IDENTITY_OF = text(
+    "select agent_identity_id from agent_sessions where organization_id = :o and id = :s"
+)
+# A vote counts only while its identity is active (I6): a revoked agent's earlier vote is ignored.
+# The same-session / same-identity flags look at every vote, so a revoked agent cannot vote twice either.
+_ROUND_STATE = text(
+    "select count(*) filter (where i.status = 'active') as n,"
+    " coalesce(bool_or(v.session_id = :s), false) as same_session,"
+    " coalesce(bool_or(a.agent_identity_id = :i), false) as same_identity from votes v"
+    " join agent_sessions a on a.organization_id = v.organization_id and a.id = v.session_id"
+    " join agent_identities i on i.organization_id = a.organization_id and i.id = a.agent_identity_id"
+    " where v.organization_id = :o and v.decision_request_id = :r"
+    " and v.request_version = :ver and v.round = :rd"
+)
+_INSERT_VOTE = text(
+    "insert into votes (organization_id, decision_request_id, session_id, round, verdict, confidence,"
+    " rationale, request_version) values (:o, :r, :s, :rd, :verdict, :confidence, :rationale, :ver)"
+    " returning id"
+)
+_ROUND_VOTES = text(
+    "select v.session_id, v.verdict, v.confidence, v.round from votes v"
+    " join agent_sessions a on a.organization_id = v.organization_id and a.id = v.session_id"
+    " join agent_identities i on i.organization_id = a.organization_id and i.id = a.agent_identity_id"
+    " where v.organization_id = :o and v.decision_request_id = :r and v.request_version = :ver"
+    " and v.round = :rd and i.status = 'active' order by v.created_at, v.id"
+)
+_REVEAL = text(
+    "update votes set revealed_at = :now where organization_id = :o and decision_request_id = :r"
+    " and request_version = :ver and round = 1"
+)
+_SET_STATUS = text(
+    "update decision_requests set status = :new, updated_at = :now, decided_at = :decided,"
+    " receipt = cast(:receipt as jsonb) where organization_id = :o and id = :r and status = :old"
+    " returning id"
+)
+
+
+def _checked_vote(verdict: Any, confidence: Any, rationale: Any, request_version: Any) -> Vote:
+    _check_text("rationale", rationale, 0, 4096)
+    if (
+        isinstance(request_version, bool)
+        or not isinstance(request_version, int)
+        or request_version < 1
+    ):
+        raise InvalidInput("request_version must be a positive int")
+    try:
+        return Vote(verdict, confidence, 1)  # validates verdict and confidence (NaN, range, bool)
+    except InvalidInput:
+        raise
+    except ValueError:
+        raise InvalidInput(f"unknown verdict {str(verdict)[:20]!r}") from None
+
+
+async def cast_vote(
+    session: AsyncSession,
+    organization_id: uuid.UUID,
+    clock: Clock,
+    *,
+    keys: KeyRing,
+    decision_request_id: uuid.UUID,
+    agent_session_id: uuid.UUID,
+    request_version: int,
+    verdict: Any,
+    confidence: Any,
+    rationale: str = "",
+) -> dict[str, Any]:
+    """Record one vote; the vote that completes the round makes the one transition (and reveals round 1).
+
+    The request row is locked first, so concurrent votes (and, later, the timeout job) are serialized:
+    a double vote sees the first, and of two last votes one closes the round and the other gets 409."""
+    vote = _checked_vote(verdict, confidence, rationale, request_version)
+    o, r = organization_id, decision_request_id
+    req = (await session.execute(_LOCK, {"o": o, "r": r})).mappings().first()
+    if req is None:
+        raise NotFoundError
+    if request_version != req["version"]:
+        raise StaleVersion
+    if req["status"] != "pending_votes":  # round 2 opens with S11's discussion gate
+        raise RoundClosed
+    if (
+        clock.now() >= req["voting_deadline_at"]
+    ):  # rule 7: past the deadline humans take over, never auto-approve
+        raise RoundClosed
+    snapshot = req["policy_snapshot"]
+    quorum = snapshot["quorum_size"]
+
+    voter = (await session.execute(_VOTER, {"o": o, "s": agent_session_id})).first()
+    if voter is None:
+        raise NotFoundError
+    identity, identity_status = voter
+    if identity_status != "active":
+        raise VoteNotAllowed("agent_inactive")
+    if req["requested_by_session_id"] is not None:
+        requester = (
+            await session.execute(_IDENTITY_OF, {"o": o, "s": req["requested_by_session_id"]})
+        ).scalar_one()
+        if requester == identity:  # the identity, not just this session
+            raise VoteNotAllowed("requester_cannot_vote")
+
+    state = (
+        await session.execute(
+            _ROUND_STATE,
+            {"o": o, "r": r, "ver": req["version"], "rd": 1, "s": agent_session_id, "i": identity},
+        )
+    ).one()
+    if state.same_session or (snapshot["require_distinct_agents"] and state.same_identity):
+        raise AlreadyVoted
+
+    vote_id = (
+        await session.execute(
+            _INSERT_VOTE,
+            {
+                "o": o, "r": r, "s": agent_session_id, "rd": 1, "ver": req["version"],
+                "verdict": vote.verdict.value, "confidence": vote.confidence, "rationale": rationale,
+            },
+        )
+    ).scalar_one()  # fmt: skip
+    cast = state.n + 1
+    # Round 1 is blind: neither audit nor outbox names a verdict or confidence (nor the rationale, ever).
+    common = {"decision_request_id": str(r), "session_id": str(agent_session_id), "round": 1,
+              "request_version": req["version"]}  # fmt: skip
+    await audit.record(session, o, "vote", vote_id, "cast", "agent", identity, common)
+    await outbox.emit(session, o, "vote.cast", common | {"cast": cast, "quorum": quorum})
+
+    status = req["status"]
+    if cast == quorum:
+        status = await _close_round(session, o, clock, keys, req, snapshot)
+    return {"vote_id": vote_id, "round": 1, "cast": cast, "quorum": quorum, "status": status}
+
+
+async def _close_round(
+    session: AsyncSession,
+    o: uuid.UUID,
+    clock: Clock,
+    keys: KeyRing,
+    req: Any,
+    snapshot: dict[str, Any],
+) -> str:
+    r, version = req["id"], req["version"]
+    rows = (await session.execute(_ROUND_VOTES, {"o": o, "r": r, "ver": version, "rd": 1})).all()
+    event = round_outcome(
+        [Vote(v.verdict, v.confidence, v.round) for v in rows],
+        risk=Risk.of(req["effective_risk_level"]),
+        quorum_size=snapshot["quorum_size"],
+        threshold=snapshot["confidence_threshold"],
+        rounds=snapshot["rounds"],
+        round_no=1,
+    )
+    if event is None:  # called only with a full quorum, so unreachable
+        raise IllegalTransitionError("the round is not complete")
+    old, new = Status(req["status"]), transition(Status(req["status"]), event)
+    now = clock.now()
+    receipt = (
+        sign(Subject(r, version, req["content_hash"], now, "auto"), keys)
+        if new is Status.APPROVED
+        else None
+    )
+    decided = now if new in (Status.APPROVED, Status.REJECTED) else None
+    result = await session.execute(
+        _SET_STATUS,
+        {
+            "o": o, "r": r, "old": old.value, "new": new.value, "now": now, "decided": decided,
+            "receipt": json.dumps(receipt) if receipt else None,
+        },
+    )  # fmt: skip
+    if result.first() is None:  # the lock makes this unreachable; never double-apply if it is not
+        raise IllegalTransitionError("the request changed under the vote")
+    await session.execute(_REVEAL, {"o": o, "r": r, "ver": version, "now": now})
+    revealed = {
+        "decision_request_id": str(r), "round": 1, "request_version": version,
+        "votes": [{"session_id": str(v.session_id), "verdict": v.verdict, "confidence": v.confidence} for v in rows],
+    }  # fmt: skip
+    await audit.record(
+        session, o, "decision_request", r, "round_revealed", "system", None, revealed
+    )
+    await outbox.emit(session, o, "round.revealed", revealed)
+    change = {"from": old.value, "to": new.value, "version": version}
+    await audit.record(
+        session,
+        o,
+        "decision_request",
+        r,
+        "status_changed",
+        "system",
+        None,
+        change | {"receipt": receipt is not None},
+    )
+    await outbox.emit(session, o, "decision.status_changed", change | {"id": str(r)})
+    return new.value
