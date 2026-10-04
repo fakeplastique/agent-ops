@@ -1,7 +1,7 @@
 import logging
 import uuid
-from collections.abc import Awaitable, Callable, Sequence
-from datetime import datetime
+from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import text
@@ -21,13 +21,13 @@ log = logging.getLogger(__name__)
 # The scan runs as app_worker and sees ids only (migration 0007); everything below runs as app_rt in the
 # item's own tenant session. A stale candidate is harmless: each item is re-checked under the request lock.
 _DUE_STEPS = text(
-    "select organization_id, id from approval_steps where status = 'pending' and due_at <= :now"
-    " order by due_at limit :n"
+    "select organization_id, id, due_at as at from approval_steps where status = 'pending' and due_at <= :now"
+    " and (due_at, id) > (:after_at, :after_id) order by due_at, id limit :n"
 )
 _DUE_REQUESTS = text(
-    "select organization_id, id from decision_requests"
+    "select organization_id, id, voting_deadline_at as at from decision_requests"
     " where status in ('pending_votes', 'pending_discussion') and voting_deadline_at <= :now"
-    " order by voting_deadline_at limit :n"
+    " and (voting_deadline_at, id) > (:after_at, :after_id) order by voting_deadline_at, id limit :n"
 )
 _STEP_REQUEST = text(
     "select decision_request_id from approval_steps where organization_id = :o and id = :s"
@@ -131,37 +131,46 @@ async def escalate_voting(
     return True
 
 
-async def _each(
-    work: AsyncEngine,
-    rows: Sequence[Any],
-    handler: Handler,
-    now: datetime,
-    counts: dict[str, int],
-    key: str,
-) -> None:
-    for org, item in rows:
-        try:
-            async with tenant_session(
-                work, org
-            ) as session:  # the tenant comes from the item, never the worker
-                if await handler(session, org, item, now):
-                    counts[key] += 1
-        except Exception:  # one poison item must not stall the rest of the sweep
-            log.exception("timeout handling failed for %s %s", key, item)
-            counts["errors"] += 1
+async def _sweep(
+    scan: AsyncEngine, work: AsyncEngine, query: Any, handler: Handler, now: datetime, limit: int,
+    counts: dict[str, int], key: str,
+) -> None:  # fmt: skip
+    """Walk every due item in pages after a (time, id) cursor: an item that is skipped (locked) or keeps
+    failing stays due, but the cursor moves past it, so it cannot hold a slot and starve what follows."""
+    after_at, after_id = datetime.min.replace(tzinfo=UTC), uuid.UUID(int=0)
+    while True:
+        async with scan.connect() as conn:
+            result = await conn.execute(
+                query, {"now": now, "n": limit, "after_at": after_at, "after_id": after_id}
+            )
+            page: list[tuple[uuid.UUID, uuid.UUID, datetime]] = [
+                (r["organization_id"], r["id"], r["at"]) for r in result.mappings()
+            ]
+        if not page:
+            return
+        for org, item, _ in page:
+            try:
+                async with tenant_session(
+                    work, org
+                ) as session:  # the tenant comes from the item, never the worker
+                    if await handler(session, org, item, now):
+                        counts[key] += 1
+            except Exception:  # one poison item must not stall the rest of the sweep
+                log.exception("timeout handling failed for %s %s", key, item)
+                counts["errors"] += 1
+        _, after_id, after_at = page[-1]
 
 
 async def run_timeouts(
     scan_engine: AsyncEngine, work_engine: AsyncEngine, clock: Clock, *, limit: int = 100
 ) -> dict[str, int]:
-    """One sweep: overdue steps, then requests past their voting deadline. Safe to repeat and to run from two
-    workers at once (each item is re-checked under the request lock, skipped if someone holds it). The only
-    clock is `clock`."""
+    """One sweep: overdue steps, then requests past their voting deadline, `limit` ids per page. Safe to repeat
+    and to run from two workers at once (each item is re-checked under the request lock, skipped if someone
+    holds it). The only clock is `clock`."""
     now = clock.now()
-    async with scan_engine.connect() as conn:
-        steps = (await conn.execute(_DUE_STEPS, {"now": now, "n": limit})).all()
-        requests = (await conn.execute(_DUE_REQUESTS, {"now": now, "n": limit})).all()
     counts = {"steps": 0, "requests": 0, "errors": 0}
-    await _each(work_engine, steps, escalate_step, now, counts, "steps")
-    await _each(work_engine, requests, escalate_voting, now, counts, "requests")
+    await _sweep(scan_engine, work_engine, _DUE_STEPS, escalate_step, now, limit, counts, "steps")
+    await _sweep(
+        scan_engine, work_engine, _DUE_REQUESTS, escalate_voting, now, limit, counts, "requests"
+    )
     return counts

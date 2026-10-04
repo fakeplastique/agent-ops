@@ -41,3 +41,4 @@ def downgrade() -> None:
         "REVOKE SELECT (id, organization_id, decision_request_id, request_version, level, status, due_at)"
         " ON approval_steps FROM app_worker"
     )
+    op.execute("REVOKE USAGE ON SCHEMA public FROM app_worker")

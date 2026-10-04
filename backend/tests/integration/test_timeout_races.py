@@ -207,3 +207,73 @@ async def test_a_deadline_moved_after_the_scan_is_rechecked_under_the_lock(
     )[0][0] == "pending_votes"
     assert await attempt(deadline) is True
     assert await attempt(deadline) is False  # and only once
+
+
+async def _three_overdue_steps(owner, app):
+    """Three tenants with one overdue step each; the first world's step is the oldest (10 min vs 60)."""
+    worlds = []
+    for minutes in (10, 60, 60):
+        w, req, _ = await approval_world(
+            owner, app, levels=[{"role": "manager", "timeout_minutes": minutes}]
+        )
+        worlds.append((w, req, (await pending_step(owner, req))[0]))
+    return worlds
+
+
+async def test_a_locked_item_at_the_head_does_not_starve_the_rest_of_the_sweep(
+    app_engine, owner_engine, worker_engine
+):
+    from app.services.escalation import run_timeouts
+
+    from .helpers import FakeClock
+
+    (_, req1, step1), (_, _, step2), (_, _, step3) = await _three_overdue_steps(
+        owner_engine, app_engine
+    )
+    at = FakeClock((await due(owner_engine, step3)) + timedelta(minutes=1))
+    async with owner_engine.connect() as holder:
+        tx = await holder.begin()
+        await holder.execute(
+            text("select 1 from decision_requests where id=:r for update"), {"r": req1["id"]}
+        )
+        # catches: the oldest, skipped item keeping the only slot (a plain `limit` with no cursor)
+        out = await run_timeouts(worker_engine, app_engine, at, limit=1)
+        await tx.commit()
+    assert out["steps"] == 2 and out["errors"] == 0
+    states = {
+        s: (await fetch(owner_engine, "select status from approval_steps where id=:s", s=s))[0][0]
+        for s in (step1, step2, step3)
+    }
+    assert states == {step1: "pending", step2: "timed_out", step3: "timed_out"}
+    assert (await run_timeouts(worker_engine, app_engine, at, limit=1))[
+        "steps"
+    ] == 1  # the skipped one, next sweep
+
+
+async def test_a_failing_item_does_not_starve_the_rest_of_the_sweep(
+    app_engine, owner_engine, worker_engine, monkeypatch
+):
+    from app.services import escalation
+
+    from .helpers import FakeClock
+
+    (_, _, step1), (_, _, step2), (_, _, step3) = await _three_overdue_steps(
+        owner_engine, app_engine
+    )
+    real = escalation.escalate_step
+
+    async def poisoned(session, o, step_id, now):
+        if step_id == step1:
+            raise RuntimeError("poison")
+        return await real(session, o, step_id, now)
+
+    monkeypatch.setattr(escalation, "escalate_step", poisoned)
+    at = FakeClock((await due(owner_engine, step3)) + timedelta(minutes=1))
+    out = await escalation.run_timeouts(worker_engine, app_engine, at, limit=1)
+    assert (out["steps"], out["errors"]) == (
+        2,
+        1,
+    )  # catches: one poison item blocking everything behind it
+    assert (await fetch(owner_engine, "select status from approval_steps where id=:s", s=step2))[0][
+        0
+    ] == "timed_out"
