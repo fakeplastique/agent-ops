@@ -5,6 +5,9 @@ SESSION = APP / "db" / "session.py"
 RESOLVER = (
     APP / "authz" / "resolver.py"
 )  # sets app.lookup_prefix: the credential lookup before a tenant is known
+WEB_SESSIONS = (
+    APP / "services" / "web_sessions.py"
+)  # sets app.session_hash and app.login_email, same reason
 
 
 def _sources():
@@ -25,8 +28,10 @@ def test_set_config_lives_in_session_py_and_the_resolver_only_and_the_resolver_n
     offenders = [
         str(p.relative_to(APP))
         for p in _sources()
-        if p not in (SESSION, RESOLVER) and "set_config" in p.read_text()
+        if p not in (SESSION, RESOLVER, WEB_SESSIONS) and "set_config" in p.read_text()
     ]
     assert offenders == []
     text = RESOLVER.read_text()
     assert "app.lookup_prefix" in text and "app.organization_id" not in text
+    web = WEB_SESSIONS.read_text()
+    assert "app.session_hash" in web and "app.organization_id" not in web

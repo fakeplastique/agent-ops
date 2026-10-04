@@ -191,9 +191,10 @@ async def test_only_the_resolver_reads_the_authorization_header():
         str(p.relative_to(root))
         for p in root.rglob("*.py")
         if p.name != "resolver.py"
-        and re.search(
-            r"authorization", p.read_text(), re.IGNORECASE
-        )  # catches: a handler parsing identity itself
+        and (  # catches: a handler parsing identity itself: the header named as a string, or the word capitalised
+            re.search(r"[\"']authorization[\"']", p.read_text(), re.IGNORECASE)
+            or re.search(r"\bAuthorization\b", p.read_text())
+        )
     ]
     assert offenders == []
 

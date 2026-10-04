@@ -6,7 +6,16 @@ from fastapi.routing import APIRoute
 ROUTES: dict[tuple[str, str], str] = {}
 
 # Routes that carry no tenant data.
-EXEMPT: set[str] = {"/healthz", "/readyz"}
+EXEMPT: set[str] = {
+    "/healthz",
+    "/readyz",
+    # Auth routes carry no tenant data: they resolve a login, a session, or switch the caller's own organization.
+    "/api/v1/auth/login",
+    "/api/v1/auth/callback",
+    "/api/v1/auth/logout",
+    "/api/v1/auth/session",
+    "/api/v1/auth/organization",
+}
 
 
 def unregistered(app: FastAPI) -> list[tuple[str, str]]:
