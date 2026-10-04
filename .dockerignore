@@ -7,3 +7,6 @@ backend/tests
 backend/postman
 **/.pytest_cache
 **/.ruff_cache
+
+# A downloaded Google OAuth client secret must never reach an image build
+client_secret_*.json

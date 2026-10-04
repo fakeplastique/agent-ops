@@ -24,3 +24,6 @@ test-results/
 playwright-report/
 next-env.d.ts
 *.tsbuildinfo
+
+# Downloaded Google OAuth client secrets: never in git, never in a build context
+client_secret_*.json
