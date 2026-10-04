@@ -62,6 +62,18 @@ async def resolve_bearer(engine: AsyncEngine, authorization: str | None) -> Reso
         raise Unauthenticated
     org, subject = matches[0]["organization_id"], matches[0]["subject"]
     async with tenant_session(engine, org) as session:
+        # The credential is checked again inside the tenant transaction: a revoke, a rotation or a removed
+        # member between the two transactions must not let this request through on a dead credential.
+        live = (
+            await session.execute(
+                text(
+                    f"select 1 from {table} where organization_id = :o and token_hash = :h and revoked_at is null"
+                ),
+                {"o": org, "h": digest},
+            )
+        ).first()
+        if live is None:
+            raise Unauthenticated
         if tag == "aop":
             status = (
                 await session.execute(
@@ -80,6 +92,8 @@ async def resolve_bearer(engine: AsyncEngine, authorization: str | None) -> Reso
                 {"o": org, "u": subject},
             )
         ).scalar()
-        if role is None:  # the user left the organization: the token dies with the membership
+        if (
+            role is None
+        ):  # unreachable (the membership's cascade deleted the PAT above); a 401, never a 500
             raise Unauthenticated
         return Resolved(UserPrincipal(subject, org, Role[role.upper()]), org)

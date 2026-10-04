@@ -259,3 +259,93 @@ async def test_revoking_twice_changes_nothing_the_second_time(app_engine, owner_
     assert (
         before == after and len(audits) == 1
     )  # catches: a duplicate audit row and a rewritten timestamp
+
+
+def _act_between_the_two_transactions(monkeypatch, action):
+    """Run `action` after the credential lookup and before the tenant transaction opens."""
+    from app.authz import resolver
+
+    real = resolver.tenant_session
+
+    def hooked(engine, org):
+        class Ctx:
+            async def __aenter__(self):
+                await action()
+                self._ctx = real(engine, org)
+                return await self._ctx.__aenter__()
+
+            async def __aexit__(self, *exc):
+                return await self._ctx.__aexit__(*exc)
+
+        return Ctx()
+
+    monkeypatch.setattr(resolver, "tenant_session", hooked)
+
+
+async def test_a_token_revoked_between_lookup_and_tenant_transaction_is_denied(
+    app_engine, owner_engine, monkeypatch
+):
+    w = await make_world(owner_engine)
+    token = await agent_token(app_engine, w)
+
+    async def revoke_token_row_only():  # the identity stays active: only the token row is revoked
+        async with owner_engine.begin() as c:
+            await c.execute(
+                text("update agent_tokens set revoked_at = now() where agent_identity_id=:i"),
+                {"i": w.identity},
+            )
+
+    _act_between_the_two_transactions(monkeypatch, revoke_token_row_only)
+    with pytest.raises(
+        Unauthenticated
+    ):  # catches: revoked tokens still resolving for the rest of an in-flight request
+        await resolve(app_engine, token)
+
+
+async def test_a_token_rotated_between_lookup_and_tenant_transaction_is_denied(
+    app_engine, owner_engine, monkeypatch
+):
+    w = await make_world(owner_engine)
+    old = await agent_token(app_engine, w)
+
+    async def rotate():
+        async with tenant_session(app_engine, w.org) as s:
+            await issue_agent_token(s, w.org, w.identity)
+
+    _act_between_the_two_transactions(monkeypatch, rotate)
+    with pytest.raises(Unauthenticated):
+        await resolve(app_engine, old)
+
+
+async def test_a_pat_revoked_or_its_user_removed_between_the_two_transactions_is_denied(
+    app_engine, owner_engine, monkeypatch
+):
+    org = await make_org(owner_engine)
+    user_a, user_b = (
+        await staff(owner_engine, org, "member"),
+        await staff(owner_engine, org, "member"),
+    )
+    async with tenant_session(app_engine, org) as s:
+        pat_a_id, token_a = await create_pat(s, org, user_a, "a")
+        _, token_b = await create_pat(s, org, user_b, "b")
+
+    async def revoke_a():
+        async with owner_engine.begin() as c:
+            await c.execute(
+                text("update personal_access_tokens set revoked_at = now() where id=:t"),
+                {"t": pat_a_id},
+            )
+
+    async def remove_b():
+        async with owner_engine.begin() as c:
+            await c.execute(
+                text("delete from memberships where organization_id=:o and user_id=:u"),
+                {"o": org, "u": user_b},
+            )
+
+    _act_between_the_two_transactions(monkeypatch, revoke_a)
+    with pytest.raises(Unauthenticated):
+        await resolve(app_engine, token_a)
+    _act_between_the_two_transactions(monkeypatch, remove_b)
+    with pytest.raises(Unauthenticated):
+        await resolve(app_engine, token_b)
