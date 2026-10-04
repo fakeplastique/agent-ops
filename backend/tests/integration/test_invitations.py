@@ -144,3 +144,32 @@ async def test_rest_invite_flow_and_revoke(web, owner_engine):
     assert (await web.client.get("/api/v1/invitations")).json()["items"] == []
     bad = await web.post("/api/v1/invitations", json={"email": "x@example.test", "role": "root"})
     assert bad.status_code == 422
+
+
+async def test_existing_member_gets_409_and_the_link_is_not_burned(app_engine, owner_engine):
+    org, email, clock = await make_org(owner_engine), addr(), FakeClock(utc(2026, 1, 1))
+    inv, raw = await invite(app_engine, owner_engine, org, email)
+    user = await user_with_email(owner_engine, email)
+    await make_member(owner_engine, org, user, "member")
+    # catches: an acceptance recorded for someone who was already in
+    with pytest.raises(AlreadyMember):
+        await accept_invitation(app_engine, user, raw, clock)
+    rows = await fetch(owner_engine, "select accepted_at from invitations where id=:i", i=inv)
+    assert rows == [(None,)]
+    assert await fetch(owner_engine, "select role from memberships where user_id=:u", u=user) == [
+        ("member",)
+    ]
+
+
+async def test_accepted_invitation_cannot_be_accepted_again_by_another_session(
+    app_engine, owner_engine
+):
+    org, email, clock = await make_org(owner_engine), addr(), FakeClock(utc(2026, 1, 1))
+    _, raw = await invite(app_engine, owner_engine, org, email)
+    user = await user_with_email(owner_engine, email)
+    await accept_invitation(app_engine, user, raw, clock)
+    async with owner_engine.begin() as c:
+        await c.execute(text("delete from memberships where user_id=:u"), {"u": user})
+    # catches: reuse after the member left
+    with pytest.raises(InvitationUnusable):
+        await accept_invitation(app_engine, user, raw, clock)
