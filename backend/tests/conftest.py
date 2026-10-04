@@ -36,6 +36,8 @@ async def _prepare() -> None:
     engine = create_async_engine(owner, poolclass=NullPool)
     async with engine.begin() as c:
         await c.exec_driver_sql(ROLES_SQL.read_text())
+        # Tests only: the role is NOLOGIN everywhere else until an environment gives it a password.
+        await c.exec_driver_sql("alter role app_worker login password 'app_worker'")
         await c.exec_driver_sql("drop schema public cascade")
         await c.exec_driver_sql("create schema public")
         await c.run_sync(upgrade)
@@ -67,6 +69,15 @@ async def app_engine() -> AsyncIterator[AsyncEngine]:
 
 
 @pytest.fixture
+async def worker_engine() -> AsyncIterator[AsyncEngine]:
+    engine = create_async_engine(
+        _urls()[0].set(username="app_worker", password="app_worker"), poolclass=NullPool
+    )
+    yield engine
+    await engine.dispose()
+
+
+@pytest.fixture
 def org_a() -> uuid.UUID:
     return uuid.uuid4()
 
@@ -74,3 +85,13 @@ def org_a() -> uuid.UUID:
 @pytest.fixture
 def org_b() -> uuid.UUID:
     return uuid.uuid4()
+
+
+@pytest.fixture
+async def drained(app_engine: AsyncEngine, worker_engine: AsyncEngine) -> None:
+    """The timeout sweep is global: clear other tests' overdue work first, so exact counts belong to a test.
+
+    Whatever it leaves (stand-in steps) is due only after the year 2100, never in a test's clock."""
+    from tests.integration.helpers import timeouts, utc
+
+    await timeouts(app_engine, worker_engine, utc(2100, 1, 1))
