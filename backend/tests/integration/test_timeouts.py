@@ -16,6 +16,7 @@ from .helpers import (
     make_world,
     open_request,
     pending_step,
+    post,
     staff,
     timeouts,
     voters,
@@ -261,3 +262,99 @@ async def test_each_tenants_work_runs_in_its_own_tenant_context(
         )
     }
     assert ids == {str(req_a["id"])}  # catches: tenant context taken from the worker, not the item
+
+
+async def test_each_effect_writes_exactly_one_audit_row_and_one_event(
+    app_engine, owner_engine, worker_engine
+):
+    two_levels = [
+        {"role": "manager", "timeout_minutes": 60},
+        {"role": "org_admin", "timeout_minutes": 60},
+    ]
+    w = await make_world(owner_engine, "pro", levels=two_levels)
+    req = await open_request(app_engine, w)
+    a, *_ = await voters(owner_engine, w, 3)
+    await cast(app_engine, w, req, a)
+    at = req["voting_deadline_at"]
+    await timeouts(app_engine, worker_engine, at)
+    await timeouts(app_engine, worker_engine, at)  # a second sweep adds nothing
+    count = lambda sql: fetch(owner_engine, sql, o=w.org, r=req["id"])
+    audit = {
+        r[0]: r[1]
+        for r in await count(
+            "select action, count(*) from audit_logs where organization_id=:o and entity_id=:r group by 1"
+        )
+    }
+    assert audit["escalated"] == 1 and audit["round_revealed"] == 1 and audit["created"] == 1
+    assert audit["status_changed"] == 1  # pending_votes -> pending_approval, once
+    events = {
+        r[0]: r[1]
+        for r in await count(
+            "select type, count(*) from outbox_events where organization_id=:o group by 1"
+        )
+    }
+    assert (
+        events["round.revealed"] == events["decision.status_changed"] == events["step.created"] == 1
+    )
+    # the step side: one time-out, one stand-in
+    step, *_ = await pending_step(owner_engine, req)
+    due_at = await step_due(owner_engine, step)
+    await timeouts(app_engine, worker_engine, due_at)
+    await timeouts(app_engine, worker_engine, due_at)
+    ev = {
+        r[0]: r[1]
+        for r in await count(
+            "select type, count(*) from outbox_events where organization_id=:o group by 1"
+        )
+    }
+    assert ev["step.timed_out"] == 1 and ev["step.created"] == 2  # level 1, then the stand-in
+    assert (
+        len(
+            await fetch(
+                owner_engine,
+                "select 1 from audit_logs where organization_id=:o and action='timed_out'",
+                o=w.org,
+            )
+        )
+        == 1
+    )
+
+
+async def test_a_message_in_the_discussion_does_not_stop_the_deadline(
+    app_engine, owner_engine, worker_engine
+):
+    w = await make_world(owner_engine, "pro", rounds=2, timeout=30)
+    req = await open_request(app_engine, w)
+    sessions = await voters(owner_engine, w, 3)
+    for s, v in zip(sessions, ("approve", "approve", "reject"), strict=True):
+        await cast(app_engine, w, req, s, v)
+    await post(app_engine, w, req, "we are talking", session=sessions[0])
+    deadline = (await req_row(owner_engine, req))[3]
+    await timeouts(app_engine, worker_engine, deadline)
+    status, reason, receipt, *_ = await req_row(owner_engine, req)
+    assert (status, reason, receipt) == (
+        "pending_approval",
+        "quorum_not_reached",
+        None,
+    )  # a message opens round 2, it does not extend the timer
+
+
+async def test_the_same_user_cannot_approve_a_stand_in_and_the_next_level(
+    app_engine, owner_engine, worker_engine
+):
+    from app.domain.errors import AlreadyDecided
+
+    w, req, _ = await approval_world(owner_engine, app_engine, high=True)
+    s1, *_ = await pending_step(owner_engine, req)
+    await timeouts(app_engine, worker_engine, await step_due(owner_engine, s1))
+    s2, *_ = await pending_step(owner_engine, req)
+    admin = await staff(owner_engine, w.org, "org_admin")
+    await decide(
+        app_engine, w, s2, admin, "org_admin"
+    )  # the level-2 stand-in satisfies levels 1 and 2
+    s3, level, _ = await pending_step(owner_engine, req)
+    assert level == 3
+    with pytest.raises(
+        AlreadyDecided
+    ):  # catches: one person walking the whole ladder after a timeout (FM8)
+        await decide(app_engine, w, s3, admin, "org_admin")
