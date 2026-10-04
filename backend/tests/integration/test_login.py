@@ -14,6 +14,18 @@ from .web_harness import ORIGIN
 pytestmark = pytest.mark.anyio
 
 
+STATE_COOKIE = "aop_oidc_state"
+
+
+def bind_browser(web, state: str) -> None:
+    """Pretend this browser started the flow with this state (what /login's cookie does)."""
+    web.client.cookies.set(STATE_COOKIE, state, domain="app.test", path="/api/v1/auth")
+
+
+def state_of(location: str) -> str:
+    return parse_qs(urlparse(location).query)["state"][0]
+
+
 def email() -> str:
     return f"user-{uuid.uuid4()}@example.test"
 
@@ -71,7 +83,14 @@ async def test_unverified_email_refused(web, owner_engine):
 
 
 async def test_missing_or_blank_email_refused(web):
-    for claims in ({"email": ""}, {"email": None}, {"email": "no-at-sign"}):
+    for claims in (
+        {"email": ""},
+        {"email": None},
+        {"email": "no-at-sign"},
+        {"email": "a\x00b@example.test"},
+        {"email": "a b@example.test"},
+        {"email": "a\n@example.test"},
+    ):
         web.fake.override = claims
         assert (await web.login("x@example.test")).status_code == 400
 
@@ -80,26 +99,82 @@ async def test_state_and_pkce_mismatch_refused(web):
     start = await web.client.get("/api/v1/auth/login")
     callback = web.fake.authorize(start.headers["location"], email())
     path = callback.removeprefix(ORIGIN)
+    state = state_of(start.headers["location"])
     forged = path.replace("state=", "state=x")
-    assert (
-        await web.client.get(forged)
-    ).status_code == 400  # catches: login CSRF (a state we never issued)
+    bind_browser(web, "x" + state)
+    assert (await web.client.get(forged)).status_code == 400  # a state we never issued
     assert (
         await web.client.get("/api/v1/auth/callback?code=abc")
     ).status_code == 400  # no state at all
+    bind_browser(web, state)
     ok = await web.client.get(path)
     assert ok.status_code == 302
     replay = web.fake.authorize(start.headers["location"], email())  # the state is single use
+    bind_browser(web, state)
     assert (await web.client.get(replay.removeprefix(ORIGIN))).status_code == 400
     # code injection: a code minted for flow B redeemed with flow A's state (and so A's PKCE verifier)
     a = await web.client.get("/api/v1/auth/login")
     b = await web.client.get("/api/v1/auth/login")
     code_b = web.fake.authorize(b.headers["location"], email()).split("code=")[1].split("&")[0]
-    state_a = parse_qs(urlparse(a.headers["location"]).query)["state"][0]
+    state_a = state_of(a.headers["location"])
+    bind_browser(
+        web, state_a
+    )  # this browser did start flow A: only PKCE can stop the injected code
     injected = await web.client.get(f"/api/v1/auth/callback?code={code_b}&state={state_a}")
     assert (
         injected.status_code == 400 and "set-cookie" not in injected.headers
     )  # PKCE: the verifier does not match
+
+
+async def test_login_csrf_a_callback_planted_in_another_browser_is_refused(web, owner_engine):
+    import httpx
+
+    from app.main import app
+
+    addr = email()
+    start = await web.client.get("/api/v1/auth/login")  # the attacker's browser starts a login...
+    planted = web.fake.authorize(start.headers["location"], addr).removeprefix(
+        ORIGIN
+    )  # ...and keeps the callback URL
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url=ORIGIN) as victim:
+        r = await victim.get(planted)  # the victim's browser is tricked into visiting it
+        assert (
+            r.status_code == 400 and r.json()["error"]["code"] == "login_failed"
+        )  # catches: login CSRF
+        assert "set-cookie" not in r.headers and victim.cookies.get("aop_session") is None
+    assert await fetch(owner_engine, "select 1 from users where email=:e", e=addr) == []
+    assert (
+        await web.client.get(planted)
+    ).status_code == 302  # the attacker's own browser is unaffected: nothing was burned
+
+
+async def test_a_state_cookie_from_another_flow_is_refused(web):
+    a = await web.client.get("/api/v1/auth/login")
+    b = await web.client.get("/api/v1/auth/login")  # the cookie jar now holds flow B's state
+    callback_a = web.fake.authorize(a.headers["location"], email()).removeprefix(ORIGIN)
+    assert (await web.client.get(callback_a)).status_code == 400  # A's code with B's cookie
+    bind_browser(web, state_of(a.headers["location"]))
+    assert (await web.client.get(callback_a)).status_code == 302  # a mismatch did not burn flow A
+    assert b
+
+
+async def test_the_state_cookie_is_httponly_secure_lax_short_and_cleared_after_login(web):
+    start = await web.client.get("/api/v1/auth/login")
+    cookie = start.headers["set-cookie"].lower()
+    assert (
+        "aop_oidc_state=" in cookie
+        and "httponly" in cookie
+        and "secure" in cookie
+        and "samesite=lax" in cookie
+    )
+    assert "path=/api/v1/auth" in cookie and "max-age=600" in cookie
+    done = await web.client.get(
+        web.fake.authorize(start.headers["location"], email()).removeprefix(ORIGIN)
+    )
+    cleared = [
+        c for c in done.headers.get_list("set-cookie") if c.lower().startswith("aop_oidc_state=")
+    ]
+    assert cleared and "max-age=0" in cleared[0].lower()
 
 
 @pytest.mark.parametrize(
@@ -111,8 +186,19 @@ async def test_state_and_pkce_mismatch_refused(web):
         {"exp": 1},
         {"_sign_with_other": True},  # right kid, wrong key
         {"_alg": "none"},
+        {"azp": "another-client"},
+        {"aud": ["client-1", "another-client"]},  # several audiences and no azp
     ],
-    ids=["nonce", "aud", "iss", "expired", "forged-signature", "alg-none"],
+    ids=[
+        "nonce",
+        "aud",
+        "iss",
+        "expired",
+        "forged-signature",
+        "alg-none",
+        "azp",
+        "multi-aud-no-azp",
+    ],
 )
 async def test_a_bad_id_token_refused(web, owner_engine, bad):
     addr = email()
@@ -353,3 +439,8 @@ async def test_a_broken_issuer_discovery_is_a_clean_503_not_a_500(web):
     )
     down = await web.client.get("/api/v1/auth/login")
     assert down.status_code == 503
+
+
+async def test_an_id_token_for_several_audiences_with_our_azp_is_accepted(web):
+    web.fake.override = {"aud": ["client-1", "another-client"], "azp": "client-1"}
+    assert (await web.login(email())).status_code == 302

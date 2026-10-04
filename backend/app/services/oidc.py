@@ -1,3 +1,4 @@
+import hmac
 import json
 import logging
 import re
@@ -56,8 +57,9 @@ async def _discover(cfg: OidcConfig) -> dict[str, str]:
     return doc
 
 
-async def begin_login(cfg: OidcConfig, redis: Redis) -> str:
-    """The issuer URL to send the browser to: state, nonce and a PKCE S256 challenge, all single-use."""
+async def begin_login(cfg: OidcConfig, redis: Redis) -> tuple[str, str]:
+    """(issuer URL, state): state, nonce and a PKCE S256 challenge, all single-use. The caller binds `state` to
+    the browser with a cookie: without that, a callback URL planted in another browser would log it in as us."""
     try:
         doc = await _discover(cfg)
     except Exception as e:  # noqa: BLE001 - unreachable, slow or wrong issuer: login is unavailable, not a 500
@@ -69,15 +71,17 @@ async def begin_login(cfg: OidcConfig, redis: Redis) -> str:
         doc["authorization_endpoint"], state=state, nonce=nonce, code_verifier=verifier
     )
     await redis.set(f"oidc:{state}", json.dumps({"v": verifier, "n": nonce}), ex=FLOW_TTL)
-    return url
+    return url, state
 
 
-async def complete_login(cfg: OidcConfig, redis: Redis, code: str, state: str) -> Identity:
+async def complete_login(
+    cfg: OidcConfig, redis: Redis, code: str, state: str, browser_state: str | None
+) -> Identity:
     """Callback: redeem the code with the PKCE verifier, verify the id token, require a verified email.
 
     Every failure is the same OidcFailed to the caller; the reason is logged without any token or code."""
     try:
-        return await _complete(cfg, redis, code, state)
+        return await _complete(cfg, redis, code, state, browser_state)
     except OidcFailed:
         raise
     except Exception as e:  # noqa: BLE001 - network, protocol, signature, claims: all the same outside
@@ -85,8 +89,14 @@ async def complete_login(cfg: OidcConfig, redis: Redis, code: str, state: str) -
         raise OidcFailed from None
 
 
-async def _complete(cfg: OidcConfig, redis: Redis, code: str, state: str) -> Identity:
+async def _complete(
+    cfg: OidcConfig, redis: Redis, code: str, state: str, browser_state: str | None
+) -> Identity:
     if not _STATE.fullmatch(state or "") or not code:
+        raise OidcFailed
+    # The state must also be the one THIS browser was given at /login (login CSRF). Checked before Redis, so a
+    # planted callback in the wrong browser cannot burn the real flow.
+    if not browser_state or not hmac.compare_digest(browser_state.encode(), state.encode()):
         raise OidcFailed
     raw = await redis.getdel(f"oidc:{state}")  # single use: a replayed state finds nothing
     if raw is None:
@@ -97,7 +107,9 @@ async def _complete(cfg: OidcConfig, redis: Redis, code: str, state: str) -> Ide
         doc["token_endpoint"], code=code, code_verifier=flow["v"]
     )
     async with httpx2.AsyncClient(transport=cfg.transport, timeout=TIMEOUT) as http:
-        jwks = (await http.get(doc["jwks_uri"])).json()
+        jwks_response = await http.get(doc["jwks_uri"])
+        jwks_response.raise_for_status()
+        jwks = jwks_response.json()
     decoded = jwt.decode(token["id_token"], KeySet.import_key_set(jwks), algorithms=["RS256"])
     registry = jwt.JWTClaimsRegistry(
         iss={"essential": True, "value": cfg.issuer},
@@ -107,11 +119,21 @@ async def _complete(cfg: OidcConfig, redis: Redis, code: str, state: str) -> Ide
     )
     registry.validate(decoded.claims)
     claims = decoded.claims
+    audience = claims.get("aud")
+    if claims.get("azp", cfg.client_id) != cfg.client_id or (
+        isinstance(audience, list) and len(audience) > 1 and "azp" not in claims
+    ):
+        raise OidcFailed  # a token issued to another party, or several audiences without saying whose it is
     email = claims.get("email")
     if claims.get("email_verified") is not True:  # only the boolean true: not "true", not 1
         raise OidcFailed
-    if not isinstance(email, str) or "@" not in email or len(email) > 320:
-        raise OidcFailed
+    if (
+        not isinstance(email, str)
+        or "@" not in email
+        or len(email) > 320
+        or any(c.isspace() or ord(c) < 32 for c in email)
+    ):
+        raise OidcFailed  # also keeps a NUL (which Postgres cannot store) out of the database layer
     name = claims.get("name")
     return Identity(
         email.strip().lower(),

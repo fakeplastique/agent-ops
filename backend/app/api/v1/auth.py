@@ -15,6 +15,10 @@ from app.services.web_sessions import ABSOLUTE, WebSession
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 
+STATE_COOKIE = "aop_oidc_state"
+FLOW_PATH = "/api/v1/auth"
+
+
 def _set_cookie(response: Response, value: str) -> None:
     # HttpOnly (no script reads it), Secure, SameSite=Lax (not sent on cross-site POSTs), the 30-day absolute cap.
     response.set_cookie(
@@ -35,7 +39,19 @@ class OrganizationIn(BaseModel):
 
 @router.get("/login")
 async def login(cfg: OidcDep, redis: RedisDep) -> RedirectResponse:
-    return RedirectResponse(await oidc.begin_login(cfg, redis), status_code=302)
+    url, state = await oidc.begin_login(cfg, redis)
+    response = RedirectResponse(url, status_code=302)
+    # Binds the flow to this browser (login CSRF). Lax: it is sent on the top-level GET back from the issuer.
+    response.set_cookie(
+        STATE_COOKIE,
+        state,
+        max_age=oidc.FLOW_TTL,
+        httponly=True,
+        secure=True,
+        samesite="lax",
+        path=FLOW_PATH,
+    )
+    return response
 
 
 @router.get("/callback")
@@ -48,11 +64,12 @@ async def callback(
     code: str = "",
     state: str = "",
 ) -> RedirectResponse:
-    who = await oidc.complete_login(cfg, redis, code, state)
+    who = await oidc.complete_login(cfg, redis, code, state, request.cookies.get(STATE_COOKIE))
     user_id = await web_sessions.find_or_create_user(engine, who.email, who.name)
     raw = await web_sessions.start_session(engine, user_id, clock, request.cookies.get(COOKIE))
     response = RedirectResponse(f"{settings.web_origin}/", status_code=302)
     _set_cookie(response, raw)
+    response.delete_cookie(STATE_COOKIE, path=FLOW_PATH, secure=True, httponly=True, samesite="lax")
     return response
 
 
