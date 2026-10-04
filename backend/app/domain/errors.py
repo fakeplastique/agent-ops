@@ -61,3 +61,16 @@ class DiscussionClosed(DomainError):
 
 class DiscussionRequired(DomainError):
     code = "discussion_required"
+
+
+class Unauthenticated(DomainError):
+    """One body for every credential failure (unknown, malformed, revoked, rotated, deactivated): no oracle."""
+
+    code = "unauthenticated"
+
+    def __init__(self) -> None:
+        super().__init__("invalid or missing credentials")
+
+
+class SessionLimit(DomainError):
+    code = "session_limit"
