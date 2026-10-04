@@ -17,6 +17,10 @@ _LIST = text(
     " join users u on u.id = m.user_id where m.organization_id = :o order by u.email, m.user_id"
     " offset :skip limit :limit"
 )
+_ONE = text(
+    "select m.user_id, u.email, u.full_name, m.role, m.team_id from memberships m"
+    " join users u on u.id = m.user_id where m.organization_id = :o and m.user_id = :u"
+)
 _ROLE = text(
     "update memberships set role = :r, updated_at = now() where organization_id = :o and user_id = :u returning 1"
 )
@@ -66,6 +70,13 @@ async def list_members(
 ) -> tuple[list[dict], int]:
     rows = (await session.execute(_LIST, {"o": org, "skip": skip, "limit": limit})).all()
     return [dict(r._mapping) for r in rows], (rows[0].total if rows else 0)
+
+
+async def get_member(session: AsyncSession, org: uuid.UUID, user_id: uuid.UUID) -> dict:
+    row = (await session.execute(_ONE, {"o": org, "u": user_id})).first()
+    if row is None:
+        raise NotFoundError
+    return dict(row._mapping)
 
 
 async def set_role(

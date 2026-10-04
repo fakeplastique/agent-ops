@@ -43,8 +43,7 @@ async def change_role(
 ) -> MemberOut:
     async with tenant_session(engine, admin.organization_id) as s:
         await members.set_role(s, admin.organization_id, user_id, body.role, admin.user_id)
-        rows, _ = await members.list_members(s, admin.organization_id, 0, 1000)
-    return MemberOut(**next(r for r in rows if r["user_id"] == user_id))
+        return MemberOut(**await members.get_member(s, admin.organization_id, user_id))
 
 
 @router.delete("/{user_id}", status_code=204)
