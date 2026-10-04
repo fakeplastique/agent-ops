@@ -80,3 +80,31 @@ async def test_the_cookie_routes_of_the_auth_router_are_covered(web):
                 json={"organization_id": "00000000-0000-0000-0000-000000000000"},
             )
             assert r.status_code == 403, (path, origin)  # before the session is even looked at
+
+
+def _depends_on(dependant, target) -> bool:
+    return any(d.call is target or _depends_on(d, target) for d in dependant.dependencies)
+
+
+# Routes that authenticate with a bearer token only (no ambient cookie): none yet. A new unsafe route is checked
+# by default; listing it here is a decision a reviewer sees.
+BEARER_ONLY: set[tuple[str, str]] = set()
+
+
+def test_every_unsafe_route_is_origin_checked_or_declared_bearer_only():
+    from app.main import app
+    from tests.cross_tenant.harness import api_routes
+
+    unsafe = [
+        (m, path, r)
+        for path, r in api_routes(app)
+        for m in (r.methods or ())
+        if m not in {"GET", "HEAD", "OPTIONS"}
+    ]
+    assert unsafe, "the route walk found no unsafe route: the guard would pass on nothing"
+    missing = [
+        (m, path)
+        for m, path, r in unsafe
+        if (m, path) not in BEARER_ONLY and not _depends_on(r.dependant, require_same_origin)
+    ]
+    assert missing == []  # catches: a cookie-authenticated write without the Origin check (FM36)

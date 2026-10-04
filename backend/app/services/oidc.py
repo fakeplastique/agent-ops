@@ -70,7 +70,11 @@ async def begin_login(cfg: OidcConfig, redis: Redis) -> tuple[str, str]:
     url, _ = _client(cfg).create_authorization_url(
         doc["authorization_endpoint"], state=state, nonce=nonce, code_verifier=verifier
     )
-    await redis.set(f"oidc:{state}", json.dumps({"v": verifier, "n": nonce}), ex=FLOW_TTL)
+    try:
+        await redis.set(f"oidc:{state}", json.dumps({"v": verifier, "n": nonce}), ex=FLOW_TTL)
+    except Exception as e:  # noqa: BLE001 - no flow store, no login: unavailable, not a 500 and not a half-flow
+        log.warning("oidc flow store failed: %s", type(e).__name__)
+        raise LoginUnavailable from None
     return url, state
 
 

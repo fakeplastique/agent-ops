@@ -80,7 +80,7 @@ async def start_session(
 
 async def load_session(engine: AsyncEngine, raw: str | None, clock: Clock) -> WebSession | None:
     """The live session for a cookie value, sliding its idle window; expired rows are deleted."""
-    if not raw or len(raw) > 200:
+    if not raw:
         return None
     now = clock.now()
     async with engine.begin() as conn:

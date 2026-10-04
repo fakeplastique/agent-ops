@@ -444,3 +444,41 @@ async def test_a_broken_issuer_discovery_is_a_clean_503_not_a_500(web):
 async def test_an_id_token_for_several_audiences_with_our_azp_is_accepted(web):
     web.fake.override = {"aud": ["client-1", "another-client"], "azp": "client-1"}
     assert (await web.login(email())).status_code == 302
+
+
+async def test_login_is_a_clean_503_when_redis_is_down(web):
+    from app.api import deps
+    from app.main import app
+
+    class DownRedis:
+        async def set(self, *a, **k):
+            raise ConnectionError("redis is away")
+
+    app.dependency_overrides[deps.get_redis] = lambda: DownRedis()
+    r = await web.client.get("/api/v1/auth/login")  # catches: a 500 for a dependency outage
+    assert r.status_code == 503 and r.json()["error"]["code"] == "login_unavailable"
+    assert "set-cookie" not in r.headers
+
+
+async def keep_active_until_just_before_the_cap(web):
+    """Log in, then touch the session every 11h so the idle window never lapses; returns the login time."""
+    await web.login(email())
+    start = web.clock.at
+    t = start
+    while t + timedelta(hours=11) < start + timedelta(days=30):
+        t += timedelta(hours=11)
+        web.clock.at = t
+        assert (await session_info(web)).status_code == 200
+    return start
+
+
+async def test_one_microsecond_inside_the_absolute_cap_is_alive(web):
+    start = await keep_active_until_just_before_the_cap(web)
+    web.clock.at = start + timedelta(days=30) - timedelta(microseconds=1)
+    assert (await session_info(web)).status_code == 200
+
+
+async def test_exactly_at_the_absolute_cap_is_expired(web):
+    start = await keep_active_until_just_before_the_cap(web)
+    web.clock.at = start + timedelta(days=30)
+    assert (await session_info(web)).status_code == 401  # catches: `>` instead of `>=` at the cap

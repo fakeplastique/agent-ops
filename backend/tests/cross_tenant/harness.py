@@ -18,11 +18,23 @@ EXEMPT: set[str] = {
 }
 
 
+def api_routes(router, prefix: str = ""):
+    """Every APIRoute with its full path, descending into included routers.
+
+    FastAPI wraps an included router, so `isinstance(r, APIRoute)` over `app.routes` finds nothing: a guard
+    built on that walk passes while looking at no route at all (test_the_route_walk_sees_the_apps_routes)."""
+    for r in router.routes:
+        if isinstance(r, APIRoute):
+            yield prefix + r.path, r
+        elif hasattr(r, "original_router"):
+            yield from api_routes(r.original_router, prefix + r.include_context.prefix)
+
+
 def unregistered(app: FastAPI) -> list[tuple[str, str]]:
     registered = {path for _, path in ROUTES}
     return sorted(
-        (m, r.path)
-        for r in app.routes
-        if isinstance(r, APIRoute) and r.path not in EXEMPT and r.path not in registered
+        (m, path)
+        for path, r in api_routes(app)
+        if path not in EXEMPT and path not in registered
         for m in (r.methods or ())
     )
