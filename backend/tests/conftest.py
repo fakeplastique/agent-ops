@@ -99,3 +99,40 @@ async def drained(app_engine: AsyncEngine, worker_engine: AsyncEngine) -> None:
         out = await timeouts(app_engine, worker_engine, utc(2100, 1, 1))
         if out["steps"] == 0 and out["requests"] == 0:
             return
+
+
+@pytest.fixture
+async def web(app_engine: AsyncEngine, monkeypatch: pytest.MonkeyPatch):
+    """The app wired to the test database, Redis database 15 and a fake issuer; Secure cookies flow over https."""
+    import httpx
+    from redis.asyncio import Redis
+
+    from app.api import deps
+    from app.config import settings
+    from app.main import app
+    from tests.integration.web_harness import (
+        CLIENT_ID,
+        ISSUER,
+        ORIGIN,
+        FakeIssuer,
+        Harness,
+        Tick,
+        utc,
+    )
+
+    fake, clock = FakeIssuer(), Tick(utc(2026, 1, 15, 10, 0))
+    redis = Redis.from_url("redis://localhost:6379/15")
+    await redis.flushdb()
+    monkeypatch.setattr(settings, "web_origin", ORIGIN)
+    monkeypatch.setattr(settings, "oidc_issuer", ISSUER)
+    monkeypatch.setattr(settings, "oidc_client_id", CLIENT_ID)
+    monkeypatch.setattr(settings, "oidc_client_secret", "secret")
+    app.dependency_overrides[deps.get_engine] = lambda: app_engine
+    app.dependency_overrides[deps.get_redis] = lambda: redis
+    app.dependency_overrides[deps.get_clock] = lambda: clock
+    app.dependency_overrides[deps.get_oidc_transport] = lambda: fake.transport()
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url=ORIGIN) as client:
+        yield Harness(client, fake, clock)
+    app.dependency_overrides.clear()
+    await redis.flushdb()
+    await redis.aclose()

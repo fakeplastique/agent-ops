@@ -15,6 +15,12 @@ class Settings(BaseSettings):
     # The timeout worker's scan identity (ids of due work only). NOLOGIN until an environment provisions it.
     worker_database_url: str = "postgresql+asyncpg://app_worker:app_worker@localhost:5432/agent_ops"
     redis_url: str = "redis://localhost:6379/0"
+    # Web login (D7): Google OIDC. The origin is the web app's (the API is reached through its rewrites), so the
+    # redirect URI, the cookie and the Origin check all live on it. Empty client id = login unavailable.
+    web_origin: str = "http://localhost:3000"
+    oidc_issuer: str = "https://accounts.google.com"
+    oidc_client_id: str = ""
+    oidc_client_secret: str = ""
     # `kid:secret,kid:secret`; the last signs, all verify. Hosted runs must set their own.
     receipt_keys: str = DEV_RECEIPT_KEYS
 

@@ -3,7 +3,8 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app.api import health
+from app.api import errors, health
+from app.api.v1 import auth
 from app.config import settings
 from app.db.engine import make_engine
 from app.db.guard import assert_safe_role
@@ -22,3 +23,5 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(title="Agent Ops", lifespan=lifespan)
 app.include_router(health.router)
+app.include_router(auth.router, prefix="/api/v1")
+errors.install(app)

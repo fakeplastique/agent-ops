@@ -2,11 +2,11 @@ import asyncio
 from datetime import timedelta
 
 import pytest
-from app.services.sessions import get_or_create_session
 from sqlalchemy import text
 
 from app.db.session import tenant_session
 from app.domain.errors import InvalidInput, NotFoundError, SessionLimit
+from app.services.sessions import get_or_create_session
 
 from .helpers import NOW, FakeClock, fetch, make_world
 

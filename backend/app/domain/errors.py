@@ -74,3 +74,19 @@ class Unauthenticated(DomainError):
 
 class SessionLimit(DomainError):
     code = "session_limit"
+
+
+class OidcFailed(DomainError):
+    """Every login failure (state, PKCE, token, signature, claims, unverified email) looks the same outside."""
+
+    code = "login_failed"
+
+    def __init__(self) -> None:
+        super().__init__("login failed")
+
+
+class LoginUnavailable(DomainError):
+    code = "login_unavailable"
+
+    def __init__(self) -> None:
+        super().__init__("login is not configured")
