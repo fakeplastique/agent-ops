@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 class PaginationParams:
     def __init__(
         self,
-        skip: int = Query(0, ge=0, description="Items to skip"),
+        skip: int = Query(0, ge=0, le=1_000_000_000, description="Items to skip"),  # fits OFFSET
         limit: int = Query(20, ge=1, le=100, description="Max items to return (1-100)"),
     ):
         self.skip = skip

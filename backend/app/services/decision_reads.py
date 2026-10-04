@@ -5,6 +5,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.errors import NotFoundError
+from app.services.validation import check_text
 
 # Explicit columns: the policy snapshot, receipt, search vector and session ids never leave this module.
 _COLUMNS = (
@@ -17,6 +18,7 @@ _FROM = (
     " from decision_requests d left join agent_sessions a"
     " on a.organization_id = d.organization_id and a.id = d.requested_by_session_id"
 )
+# ponytail: `q` is an ILIKE scan within one org; add a trigram index if per-org lists grow large.
 _FILTER = (
     " where d.organization_id = :o and (cast(:status as text) is null or d.status = :status)"
     " and (cast(:risk as text) is null or d.effective_risk_level = :risk)"
@@ -54,6 +56,7 @@ async def get_decision(session: AsyncSession, o: uuid.UUID, r: uuid.UUID) -> dic
 def _like(q: str | None) -> str | None:
     if q is None:
         return None
+    check_text("q", q, 1, 200)  # NUL or a lone surrogate would reach asyncpg as a 500
     return "%" + q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
 
 

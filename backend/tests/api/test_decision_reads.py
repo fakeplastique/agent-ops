@@ -75,5 +75,12 @@ async def test_filters_status_risk_agent_q_combine_and_page(web, app_engine, own
     for sort in ("created_at", "-created_at", "updated_at", "-updated_at", "title", "-title"):
         r = await web.client.get(DR, headers=h, params={"sort": sort})
         assert r.status_code == 200 and r.json()["total"] == 6
-    for bad in ({"sort": "id; drop table x"}, {"status": "nope"}, {"risk_level": "LOW"}):
+    bad_params = [
+        {"sort": "id; drop table x"},
+        {"status": "nope"},
+        {"risk_level": "LOW"},
+        {"q": "a\x00b"},  # Postgres text cannot hold NUL: 422, not a 500
+        {"skip": 10**20},
+    ]
+    for bad in bad_params:
         assert (await web.client.get(DR, headers=h, params=bad)).status_code == 422

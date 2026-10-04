@@ -76,3 +76,10 @@ def test_total_and_nextlink_null_on_last_page():
     assert body["skip"] == 20
     assert body["limit"] == 10
     assert body["nextLink"] is None
+
+
+def test_skip_beyond_a_database_integer_is_422_not_500():
+    # catches: an unbounded skip reaching asyncpg as an int64 overflow (500)
+    res = client.get("/test-pagination/items", params={"skip": 10**20})
+    assert res.status_code == 422
+    assert client.get("/test-pagination/items", params={"skip": 1_000_000}).status_code == 200
