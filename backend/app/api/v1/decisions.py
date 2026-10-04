@@ -23,21 +23,21 @@ REST_LABEL = "rest"  # REST has no session id: one REST session per agent identi
 router = APIRouter(prefix="/decision-requests", tags=["decision-requests"])
 
 
-async def agent_session(s: AsyncSession, actor: Principal, clock: Clock) -> uuid.UUID | None:
-    if not isinstance(actor, AgentPrincipal):
-        return None
+async def session_of(s: AsyncSession, agent: AgentPrincipal, clock: Clock) -> uuid.UUID:
     sid, _ = await get_or_create_session(
-        s, actor.organization_id, actor.agent_id, clock, argument_label=REST_LABEL
+        s, agent.organization_id, agent.agent_id, clock, argument_label=REST_LABEL
     )
     return sid
+
+
+async def agent_session(s: AsyncSession, actor: Principal, clock: Clock) -> uuid.UUID | None:
+    return await session_of(s, actor, clock) if isinstance(actor, AgentPrincipal) else None
 
 
 async def viewer_session(s: AsyncSession, actor: Principal) -> uuid.UUID | None:
     if not isinstance(actor, AgentPrincipal):
         return None
-    return await decision_reads.find_session(
-        s, actor.organization_id, actor.agent_id, REST_LABEL
-    )
+    return await decision_reads.find_session(s, actor.organization_id, actor.agent_id, REST_LABEL)
 
 
 def user_of(actor: Principal) -> uuid.UUID | None:
@@ -59,9 +59,7 @@ def _created(body: Any, status: int = 201) -> JSONResponse:
     return JSONResponse(body, status_code=status, headers=headers)
 
 
-@router.post(
-    "", status_code=201, response_model=DecisionOut, dependencies=[Depends(write_limit)]
-)
+@router.post("", status_code=201, response_model=DecisionOut, dependencies=[Depends(write_limit)])
 async def create(
     body: DecisionIn,
     actor: ActorDep,
@@ -135,7 +133,7 @@ async def revise(
     async with tenant_session(engine, agent.organization_id) as s:
         await decisions.revise_decision(
             s, agent.organization_id, clock, decision_request_id=decision_request_id,
-            agent_session_id=await agent_session(s, agent, clock), **body.model_dump(),
+            agent_session_id=await session_of(s, agent, clock), **body.model_dump(),
         )  # fmt: skip
         return await read(s, agent, decision_request_id)
 

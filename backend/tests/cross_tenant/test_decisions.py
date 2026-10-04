@@ -30,7 +30,9 @@ async def test_cross_tenant_ids_404_for_every_method(web, app_engine, owner_engi
         assert (method, path, r.status_code) == (method, path, 404), r.text
     # and the list never shows it
     assert (await web.client.get(DR, headers=b_user)).json()["total"] == 0
-    rows = await fetch(owner_engine, "select status, version from decision_requests where id=:r", r=req["id"])
+    rows = await fetch(
+        owner_engine, "select status, version from decision_requests where id=:r", r=req["id"]
+    )
     assert rows == [("pending_votes", 1)]
     # B's own create still works, so the 404s are not a broken route
     assert (await web.client.post(DR, json=BODY, headers=b_agent)).status_code == 201

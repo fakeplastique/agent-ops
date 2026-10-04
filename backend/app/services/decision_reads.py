@@ -72,7 +72,9 @@ async def list_decisions(
     """Filters combine with AND; `risk_level` matches the effective risk (what routes the request)."""
     args = {"o": o, "status": status, "risk": risk_level, "agent": agent_id, "q": _like(q)}
     total = await session.scalar(text(f"select count(*){_FROM}{_FILTER}"), args)
-    page = text(f"select {_COLUMNS}{_FROM}{_FILTER} order by {SORTS[sort]} limit :limit offset :skip")
+    page = text(
+        f"select {_COLUMNS}{_FROM}{_FILTER} order by {SORTS[sort]} limit :limit offset :skip"
+    )
     rows = (await session.execute(page, args | {"limit": limit, "skip": skip})).mappings().all()
     return [dict(r) for r in rows], int(total or 0)
 

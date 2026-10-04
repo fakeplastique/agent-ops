@@ -13,9 +13,7 @@ from app.services import decision_reads, messages
 router = APIRouter(prefix="/decision-requests/{decision_request_id}/messages", tags=["messages"])
 
 
-@router.post(
-    "", status_code=201, response_model=MessagePosted, dependencies=[Depends(write_limit)]
-)
+@router.post("", status_code=201, response_model=MessagePosted, dependencies=[Depends(write_limit)])
 async def post(
     decision_request_id: uuid.UUID,
     body: MessageIn,

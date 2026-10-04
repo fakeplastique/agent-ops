@@ -13,10 +13,14 @@ async def test_blind_votes_not_in_get_or_list_before_reveal(web, app_engine, own
     w = await make_world(owner_engine, quorum=3)
     user = await user_auth(app_engine, w.org, w.owner_user)
     req = (await web.client.post(DR, json=BODY, headers=user)).json()
-    voters = [await agent_auth(app_engine, w.org, (await add_agent(owner_engine, w))[0]) for _ in range(3)]
+    voters = [
+        await agent_auth(app_engine, w.org, (await add_agent(owner_engine, w))[0]) for _ in range(3)
+    ]
     for i, h in enumerate(voters[:2]):
         body = VOTE | {"rationale": f"secret-rationale-{i}"}
-        assert (await web.client.post(f"{DR}/{req['id']}/votes", json=body, headers=h)).status_code == 201
+        assert (
+            await web.client.post(f"{DR}/{req['id']}/votes", json=body, headers=h)
+        ).status_code == 201
 
     votes = f"{DR}/{req['id']}/votes"
     # catches: blind data via the list endpoint (and the request read, and another voter)
@@ -43,11 +47,18 @@ async def test_filters_status_risk_agent_q_combine_and_page(web, app_engine, own
         mine.append(await open_request(app_engine, w, title=f"Refund {i}", risk_level="high"))
     await open_request(app_engine, w, title="Refund medium", risk_level="medium")
     await open_request(app_engine, w, title="Other high", risk_level="high")
-    await open_request(app_engine, w, agent_session_id=other_sess, title="Refund theirs", risk_level="high")
+    await open_request(
+        app_engine, w, agent_session_id=other_sess, title="Refund theirs", risk_level="high"
+    )
     await withdraw(app_engine, w, mine[2], session=w.session)
     h = await user_auth(app_engine, w.org, w.owner_user)
 
-    q = {"status": "pending_votes", "risk_level": "high", "agent_id": str(w.identity), "q": "refund"}
+    q = {
+        "status": "pending_votes",
+        "risk_level": "high",
+        "agent_id": str(w.identity),
+        "q": "refund",
+    }
     first = (await web.client.get(DR, headers=h, params=q | {"limit": 1, "sort": "title"})).json()
     # catches: a filter dropped when sorting or paging
     assert first["total"] == 2 and [d["title"] for d in first["items"]] == ["Refund 0"]

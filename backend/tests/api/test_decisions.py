@@ -23,9 +23,7 @@ async def usage(owner, org) -> int:
     return rows[0][0] if rows else 0
 
 
-async def test_concurrent_create_same_key_one_request_one_usage_unit(
-    web, app_engine, owner_engine
-):
+async def test_concurrent_create_same_key_one_request_one_usage_unit(web, app_engine, owner_engine):
     w = await make_world(owner_engine)
     h = await agent_auth(app_engine, w.org, w.identity) | {"Idempotency-Key": "k-1"}
     # catches: duplicate request and double metering (FM9)
@@ -33,7 +31,9 @@ async def test_concurrent_create_same_key_one_request_one_usage_unit(
     assert {r.status_code for r in out} == {201}
     assert all(r.json() == out[0].json() for r in out)  # jsonb reorders keys, values match
     assert len({r.headers["location"] for r in out}) == 1
-    rows = await fetch(owner_engine, "select id from decision_requests where organization_id=:o", o=w.org)
+    rows = await fetch(
+        owner_engine, "select id from decision_requests where organization_id=:o", o=w.org
+    )
     assert len(rows) == 1
     assert await usage(owner_engine, w.org) == 1
     # same key, other body: 422, still one request
@@ -82,3 +82,38 @@ async def test_caps_title_200_payload_64k_message_4k(web, app_engine, owner_engi
     msgs = f"{DR}/{req['id']}/messages"
     assert (await web.client.post(msgs, json={"body": "m" * 4096}, headers=h)).status_code == 201
     assert (await web.client.post(msgs, json={"body": "m" * 4097}, headers=h)).status_code == 422
+
+
+async def test_revise_withdraw_vote_message_routes_map_service_errors(
+    web, app_engine, owner_engine
+):
+    w = await make_world(owner_engine)
+    agent = await agent_auth(app_engine, w.org, w.identity)
+    user = await user_auth(app_engine, w.org, w.owner_user)
+    voter = await agent_auth(app_engine, w.org, (await add_agent(owner_engine, w))[0])
+    rid = (await web.client.post(DR, json=BODY, headers=agent)).json()["id"]
+    one = f"{DR}/{rid}"
+    vote = {"request_version": 1, "verdict": "approve", "confidence": 0.9}
+    calls = [
+        ("POST", f"{one}/revise", {"title": "x"}, user, 403, "forbidden"),
+        ("POST", f"{one}/votes", vote, user, 403, "forbidden"),
+        ("POST", f"{one}/votes", vote, agent, 403, "vote_not_allowed"),
+        ("POST", f"{one}/votes", vote | {"request_version": 2}, voter, 409, "stale_version"),
+        ("POST", f"{one}/votes", vote | {"confidence": True}, voter, 422, "invalid_input"),
+        ("POST", f"{one}/votes", vote | {"confidence": 1.5}, voter, 422, "invalid_input"),
+        ("POST", f"{one}/messages", {"body": "hi"}, voter, 409, "discussion_closed"),
+        ("POST", f"{one}/revise", {"title": BODY["title"]}, agent, 422, "invalid_input"),
+        ("POST", f"{one}/revise", {"title": "x"}, voter, 403, "forbidden"),
+        ("POST", f"{one}/withdraw", None, user, 403, "forbidden"),  # a member, not org_admin
+        ("POST", f"{one}/withdraw", None, agent, 200, None),
+        ("POST", f"{one}/withdraw", None, agent, 409, "illegal_transition"),
+        ("POST", f"{one}/revise", {"title": "x"}, agent, 409, "illegal_transition"),
+        ("POST", f"{one}/votes", vote, voter, 409, "round_closed"),
+        ("POST", f"{DR}/{w.org}/withdraw", None, agent, 404, "not_found"),
+    ]
+    # catches: 500 on illegal_transition and friends
+    for method, path, body, h, status, code in calls:
+        r = await web.client.request(method, path, json=body, headers=h)
+        got = (r.status_code, r.json()["error"]["code"] if status >= 400 else None)
+        assert got == (status, code), (path, body, r.text)
+    assert (await web.client.get(one, headers=user)).json()["status"] == "cancelled"

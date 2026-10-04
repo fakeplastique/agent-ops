@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Request, Response
 from app.api.deps import ActorDep, ClockDep, EngineDep, write_limit
 from app.api.pagination import PaginationParams, paginate
 from app.api.schemas.decisions import VoteCast, VoteIn, VoteOut, VotesPage
-from app.api.v1.decisions import PATH, agent_session, require_agent, viewer_session
+from app.api.v1.decisions import PATH, require_agent, session_of, viewer_session
 from app.config import settings
 from app.db.session import tenant_session
 from app.domain.receipt import KeyRing
@@ -30,7 +30,7 @@ async def cast(
         out = await decisions.cast_vote(
             s, agent.organization_id, clock, keys=KeyRing.parse(settings.receipt_keys),
             decision_request_id=decision_request_id,
-            agent_session_id=await agent_session(s, agent, clock), **body.model_dump(),
+            agent_session_id=await session_of(s, agent, clock), **body.model_dump(),
         )  # fmt: skip
     response.headers["Location"] = f"{PATH}/{decision_request_id}/votes"
     return VoteCast(**out)
@@ -51,5 +51,7 @@ async def list_votes(
             viewer_session_id=await viewer_session(s, actor),
         )  # fmt: skip
     rows = [VoteOut(**v) for v in seen["votes"]]
-    base = paginate(request, rows[page.skip : page.skip + page.limit], len(rows), page.skip, page.limit)
+    base = paginate(
+        request, rows[page.skip : page.skip + page.limit], len(rows), page.skip, page.limit
+    )
     return VotesPage(**base.model_dump(), cast=seen["cast"], quorum=seen["quorum"])
