@@ -12,11 +12,13 @@ class Settings(BaseSettings):
     # Runtime role (non-owner, RLS applies); migrations use the owner URL.
     database_url: str = "postgresql+asyncpg://app_rt:app_rt@localhost:5432/agent_ops"
     migrate_database_url: str = "postgresql+asyncpg://app:app@localhost:5432/agent_ops"
+    # The timeout worker's scan identity (ids of due work only). NOLOGIN until an environment provisions it.
+    worker_database_url: str = "postgresql+asyncpg://app_worker:app_worker@localhost:5432/agent_ops"
     redis_url: str = "redis://localhost:6379/0"
     # `kid:secret,kid:secret`; the last signs, all verify. Hosted runs must set their own.
     receipt_keys: str = DEV_RECEIPT_KEYS
 
-    @field_validator("database_url", "migrate_database_url")
+    @field_validator("database_url", "migrate_database_url", "worker_database_url")
     @classmethod
     def _asyncpg_driver(cls, v: str) -> str:
         # Hosts (Railway) hand out postgresql://, which SQLAlchemy maps to the sync psycopg2.

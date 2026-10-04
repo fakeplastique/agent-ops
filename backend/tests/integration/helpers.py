@@ -313,3 +313,11 @@ async def post(engine, w, req, body="hello", *, session=None, user=None, clock=N
             agent_session_id=session,
             user_id=user,
         )
+
+
+async def timeouts(app_engine, worker_engine, at) -> dict:
+    """run_timeouts with a fixed clock; `at` is a datetime or a FakeClock."""
+    from app.services.escalation import run_timeouts
+
+    clock = FakeClock(at) if isinstance(at, datetime) else at
+    return await run_timeouts(worker_engine, app_engine, clock)

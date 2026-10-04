@@ -31,6 +31,7 @@ from app.services.status import change_status
 from app.services.steps import open_first_step
 from app.services.usage import consume
 from app.services.validation import check_text as _check_text
+from app.services.votes import reveal_round_one, round_votes
 
 TITLE_MAX, DESCRIPTION_MAX, PAYLOAD_MAX = 200, 4096, 65_536  # D21
 
@@ -192,23 +193,12 @@ _INSERT_VOTE = text(
     " rationale, request_version) values (:o, :r, :s, :rd, :verdict, :confidence, :rationale, :ver)"
     " returning id"
 )
-_ROUND_VOTES = text(
-    "select v.session_id, v.verdict, v.confidence, v.round from votes v"
-    " join agent_sessions a on a.organization_id = v.organization_id and a.id = v.session_id"
-    " join agent_identities i on i.organization_id = a.organization_id and i.id = a.agent_identity_id"
-    " where v.organization_id = :o and v.decision_request_id = :r and v.request_version = :ver"
-    " and v.round = :rd and i.status = 'active' order by v.created_at, v.id"
-)
 _DISCUSSED = text(
     "select exists (select 1 from messages where organization_id = :o and decision_request_id = :r"
     " and request_version = :v and author_type <> 'system')"
 )
 _SET_DEADLINE = text(
     "update decision_requests set voting_deadline_at = :d where organization_id = :o and id = :r"
-)
-_REVEAL = text(
-    "update votes set revealed_at = :now where organization_id = :o and decision_request_id = :r"
-    " and request_version = :ver and round = 1"
 )
 
 
@@ -323,7 +313,7 @@ async def _close_round(
     rd: int,
 ) -> str:
     r, version = req["id"], req["version"]
-    rows = (await session.execute(_ROUND_VOTES, {"o": o, "r": r, "ver": version, "rd": rd})).all()
+    rows = await round_votes(session, o, r, version, rd)
     event = round_outcome(
         [Vote(v.verdict, v.confidence, v.round) for v in rows],
         risk=Risk.of(req["effective_risk_level"]),
@@ -342,15 +332,7 @@ async def _close_round(
         else None
     )
     if rd == 1:  # the blind round is revealed by closing; round 2 was never hidden
-        await session.execute(_REVEAL, {"o": o, "r": r, "ver": version, "now": now})
-        revealed = {
-            "decision_request_id": str(r), "round": 1, "request_version": version,
-            "votes": [{"session_id": str(v.session_id), "verdict": v.verdict, "confidence": v.confidence} for v in rows],
-        }  # fmt: skip
-        await audit.record(
-            session, o, "decision_request", r, "round_revealed", "system", None, revealed
-        )
-        await outbox.emit(session, o, "round.revealed", revealed)
+        await reveal_round_one(session, o, r, version, now, rows)
     await change_status(session, o, r, version, old, new, now, receipt, "system", None)
     if new is Status.PENDING_APPROVAL:
         await open_first_step(session, o, r, version, snapshot, now)

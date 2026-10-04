@@ -36,6 +36,8 @@ async def _prepare() -> None:
     engine = create_async_engine(owner, poolclass=NullPool)
     async with engine.begin() as c:
         await c.exec_driver_sql(ROLES_SQL.read_text())
+        # Tests only: the role is NOLOGIN everywhere else until an environment gives it a password.
+        await c.exec_driver_sql("alter role app_worker login password 'app_worker'")
         await c.exec_driver_sql("drop schema public cascade")
         await c.exec_driver_sql("create schema public")
         await c.run_sync(upgrade)
@@ -43,8 +45,19 @@ async def _prepare() -> None:
 
 
 @pytest.fixture(scope="session", autouse=True)
-def _migrated_db() -> None:
+def _migrated_db():
     asyncio.run(_prepare())
+    yield
+    asyncio.run(
+        _worker_nologin()
+    )  # roles are cluster-wide: do not leave a known-password login behind
+
+
+async def _worker_nologin() -> None:
+    engine = create_async_engine(_urls()[0], poolclass=NullPool)
+    async with engine.begin() as c:
+        await c.exec_driver_sql("alter role app_worker nologin")
+    await engine.dispose()
 
 
 @pytest.fixture
@@ -67,6 +80,15 @@ async def app_engine() -> AsyncIterator[AsyncEngine]:
 
 
 @pytest.fixture
+async def worker_engine() -> AsyncIterator[AsyncEngine]:
+    engine = create_async_engine(
+        _urls()[0].set(username="app_worker", password="app_worker"), poolclass=NullPool
+    )
+    yield engine
+    await engine.dispose()
+
+
+@pytest.fixture
 def org_a() -> uuid.UUID:
     return uuid.uuid4()
 
@@ -74,3 +96,17 @@ def org_a() -> uuid.UUID:
 @pytest.fixture
 def org_b() -> uuid.UUID:
     return uuid.uuid4()
+
+
+@pytest.fixture
+async def drained(app_engine: AsyncEngine, worker_engine: AsyncEngine) -> None:
+    """The timeout sweep is global: clear other tests' overdue work first, so exact counts belong to a test.
+
+    Sweeps (far in the future, so every leftover is due) until nothing is left to do. What a sweep leaves
+    behind (stand-in steps) is due only after the year 2100, never in a test's clock."""
+    from tests.integration.helpers import timeouts, utc
+
+    for _ in range(20):
+        out = await timeouts(app_engine, worker_engine, utc(2100, 1, 1))
+        if out["steps"] == 0 and out["requests"] == 0:
+            return

@@ -51,13 +51,13 @@ _DECIDE = text(
 )
 _INSERT_STEP = text(
     "insert into approval_steps (organization_id, decision_request_id, request_version, level,"
-    " required_role, due_at) values (:o, :r, :v, :level, :role, :due) returning id"
+    " required_role, due_at, stands_in_for_level) values (:o, :r, :v, :level, :role, :due, :stands) returning id"
 )
 
 
-async def _open_step(
+async def open_step(
     session: AsyncSession, o: uuid.UUID, request_id: uuid.UUID, version: int,
-    level: int, snapshot: dict[str, Any], now: datetime,
+    level: int, snapshot: dict[str, Any], now: datetime, stands_in_for: int | None = None,
 ) -> uuid.UUID:  # fmt: skip
     spec = snapshot["levels"][level - 1]
     step_id = (
@@ -65,12 +65,12 @@ async def _open_step(
             _INSERT_STEP,
             {
                 "o": o, "r": request_id, "v": version, "level": level, "role": spec["role"],
-                "due": now + timedelta(minutes=spec["timeout_minutes"]),
+                "due": now + timedelta(minutes=spec["timeout_minutes"]), "stands": stands_in_for,
             },
         )
     ).scalar_one()  # fmt: skip
     data = {"decision_request_id": str(request_id), "request_version": version, "level": level,
-            "required_role": spec["role"]}  # fmt: skip
+            "required_role": spec["role"], "stands_in_for_level": stands_in_for}  # fmt: skip
     await audit.record(session, o, "approval_step", step_id, "created", "system", None, data)
     await outbox.emit(session, o, "step.created", data | {"id": str(step_id)})
     return step_id
@@ -81,7 +81,7 @@ async def open_first_step(
     snapshot: dict[str, Any], now: datetime,
 ) -> uuid.UUID:  # fmt: skip
     """Level 1 opens when a request enters pending_approval; later levels open as each one approves."""
-    return await _open_step(session, o, request_id, version, 1, snapshot, now)
+    return await open_step(session, o, request_id, version, 1, snapshot, now)
 
 
 def _role(name: str) -> Role:
@@ -226,7 +226,7 @@ async def decide_step(
         )
         status = new
     else:
-        next_step = await _open_step(
+        next_step = await open_step(
             session, o, req["id"], req["version"], step["level"] + 1, snapshot, now
         )
     return {
