@@ -6,7 +6,7 @@ from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.adapters.clock import SystemClock
-from app.api.ratelimit import auth_failed, check_write
+from app.api.ratelimit import auth_failed, check_user_write, check_write
 from app.authz.matrix import Action, Role, can
 from app.authz.origin import require_same_origin
 from app.authz.principals import Principal, UserPrincipal
@@ -130,6 +130,11 @@ def require_org_admin(actor: ActorDep) -> UserPrincipal:
 AdminDep = Annotated[UserPrincipal, Depends(require_org_admin)]
 
 
-async def write_limit(principal: PrincipalDep, redis: RedisDep, clock: ClockDep) -> None:
+async def write_limit(actor: ActorDep, redis: RedisDep, clock: ClockDep) -> None:
     """Dependency for every write route (per principal and per organization)."""
-    await check_write(redis, principal, clock)
+    await check_write(redis, actor, clock)
+
+
+async def user_write_limit(session: SessionDep, redis: RedisDep, clock: ClockDep) -> None:
+    """Same, for writes made before an organization exists."""
+    await check_user_write(redis, session.user_id, clock)

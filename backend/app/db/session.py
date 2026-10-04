@@ -13,8 +13,13 @@ async def use_tenant(conn: AsyncConnection, org_id: uuid.UUID) -> None:
     )
 
 
+LOOKUP_KEYS = frozenset({"app.self_user_id", "app.invite_hash"})
+
+
 async def lookup_as(conn: AsyncConnection, key: str, value: str) -> None:
     """Name the one row a pre-tenant lookup policy may show (transaction-local), e.g. `app.invite_hash`."""
+    if key not in LOOKUP_KEYS:  # never a way round use_tenant, the one writer of the tenant setting
+        raise ValueError(key)
     await conn.execute(text("select set_config(:k, :v, true)"), {"k": key, "v": value})
 
 

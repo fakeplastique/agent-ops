@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Request, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 
-from app.api.deps import COOKIE, ActorDep, ClockDep, EngineDep, SessionDep
+from app.api.deps import COOKIE, ActorDep, ClockDep, EngineDep, SessionDep, user_write_limit
 from app.api.schemas.base import BaseSchema
 from app.authz.origin import require_same_origin
 from app.db.session import tenant_session
@@ -35,7 +35,10 @@ async def _read(engine: EngineDep, org: uuid.UUID) -> OrganizationOut:
 
 
 @router.post(
-    "", status_code=201, response_model=OrganizationOut, dependencies=[Depends(require_same_origin)]
+    "",
+    status_code=201,
+    response_model=OrganizationOut,
+    dependencies=[Depends(require_same_origin), Depends(user_write_limit)],
 )
 async def create_organization(
     body: OrganizationIn,

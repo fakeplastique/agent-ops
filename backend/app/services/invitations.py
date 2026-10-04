@@ -87,12 +87,18 @@ async def create_invitation(
 
 
 async def revoke_invitation(
-    session: AsyncSession, org: uuid.UUID, invitation_id: uuid.UUID, clock: Clock
+    session: AsyncSession,
+    org: uuid.UUID,
+    invitation_id: uuid.UUID,
+    clock: Clock,
+    actor: uuid.UUID | None = None,
 ) -> None:
     done = await session.execute(_REVOKE, {"o": org, "i": invitation_id, "now": clock.now()})
     if done.first() is None:
         raise NotFoundError
-    await audit.record(session, org, "invitation", invitation_id, "invitation_revoked", "user")
+    await audit.record(
+        session, org, "invitation", invitation_id, "invitation_revoked", "user", actor
+    )
 
 
 async def pending_invitations(session: AsyncSession, org: uuid.UUID, clock: Clock) -> list[dict]:

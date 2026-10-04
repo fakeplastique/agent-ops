@@ -5,7 +5,15 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Request, Response
 from pydantic import BaseModel, Field
 
-from app.api.deps import COOKIE, AdminDep, ClockDep, EngineDep, SessionDep
+from app.api.deps import (
+    COOKIE,
+    AdminDep,
+    ClockDep,
+    EngineDep,
+    SessionDep,
+    user_write_limit,
+    write_limit,
+)
 from app.api.pagination import Page, PaginationParams, paginate
 from app.api.schemas.base import BaseSchema
 from app.authz.origin import require_same_origin
@@ -37,7 +45,9 @@ class AcceptIn(BaseSchema):
     token: str = Field(max_length=200)
 
 
-@router.post("", status_code=201, response_model=InvitationCreated)
+@router.post(
+    "", status_code=201, response_model=InvitationCreated, dependencies=[Depends(write_limit)]
+)
 async def create(
     body: InvitationIn, response: Response, admin: AdminDep, engine: EngineDep, clock: ClockDep
 ) -> InvitationCreated:
@@ -65,12 +75,14 @@ async def list_pending(
     )
 
 
-@router.delete("/{invitation_id}", status_code=204)
+@router.delete("/{invitation_id}", status_code=204, dependencies=[Depends(write_limit)])
 async def revoke(
     invitation_id: uuid.UUID, admin: AdminDep, engine: EngineDep, clock: ClockDep
 ) -> Response:
     async with tenant_session(engine, admin.organization_id) as s:
-        await invitations.revoke_invitation(s, admin.organization_id, invitation_id, clock)
+        await invitations.revoke_invitation(
+            s, admin.organization_id, invitation_id, clock, admin.user_id
+        )
     return Response(status_code=204)
 
 
@@ -79,7 +91,11 @@ class Joined(BaseModel):
     role: str
 
 
-@router.post("/accept", response_model=Joined, dependencies=[Depends(require_same_origin)])
+@router.post(
+    "/accept",
+    response_model=Joined,
+    dependencies=[Depends(require_same_origin), Depends(user_write_limit)],
+)
 async def accept(
     body: AcceptIn, request: Request, session: SessionDep, engine: EngineDep, clock: ClockDep
 ) -> Joined:

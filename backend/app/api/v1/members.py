@@ -4,7 +4,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Request, Response
 from pydantic import BaseModel, Field
 
-from app.api.deps import ActorDep, AdminDep, EngineDep
+from app.api.deps import ActorDep, AdminDep, EngineDep, write_limit
 from app.api.pagination import Page, PaginationParams, paginate
 from app.api.schemas.base import BaseSchema
 from app.db.session import tenant_session
@@ -37,7 +37,7 @@ async def list_members(
     return paginate(request, [MemberOut(**r) for r in rows], total, page.skip, page.limit)
 
 
-@router.patch("/{user_id}", response_model=MemberOut)
+@router.patch("/{user_id}", response_model=MemberOut, dependencies=[Depends(write_limit)])
 async def change_role(
     user_id: uuid.UUID, body: RoleIn, admin: AdminDep, engine: EngineDep
 ) -> MemberOut:
@@ -46,7 +46,7 @@ async def change_role(
         return MemberOut(**await members.get_member(s, admin.organization_id, user_id))
 
 
-@router.delete("/{user_id}", status_code=204)
+@router.delete("/{user_id}", status_code=204, dependencies=[Depends(write_limit)])
 async def remove(user_id: uuid.UUID, admin: AdminDep, engine: EngineDep) -> Response:
     async with tenant_session(engine, admin.organization_id) as s:
         await members.remove_member(s, admin.organization_id, user_id, admin.user_id)
