@@ -1,4 +1,5 @@
 import logging
+import uuid
 from datetime import datetime
 
 from redis.asyncio import Redis
@@ -48,6 +49,13 @@ async def check_write(
         raise RateLimited(wait)
     hits, wait = await _hit(redis, f"w:o:{org}", now)
     if hits > (per_org or settings.write_limit_per_org):
+        raise RateLimited(wait)
+
+
+async def check_user_write(redis: Redis, user_id: uuid.UUID, clock: Clock) -> None:
+    """Writes by a signed-in user who has no organization yet (create one, accept an invitation)."""
+    hits, wait = await _hit(redis, f"w:u:{user_id}", clock.now())
+    if hits > settings.write_limit_per_principal:
         raise RateLimited(wait)
 
 

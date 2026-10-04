@@ -6,15 +6,17 @@ from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.adapters.clock import SystemClock
-from app.api.ratelimit import auth_failed, check_write
-from app.authz.principals import Principal
+from app.api.ratelimit import auth_failed, check_user_write, check_write
+from app.authz.matrix import Action, Role, can
+from app.authz.origin import require_same_origin
+from app.authz.principals import Principal, UserPrincipal
 from app.authz.resolver import resolve_bearer
 from app.config import settings
 from app.db.engine import make_engine
-from app.domain.errors import LoginUnavailable, Unauthenticated
+from app.domain.errors import Forbidden, LoginUnavailable, Unauthenticated
 from app.ports.clock import Clock
 from app.services.oidc import OidcConfig
-from app.services.web_sessions import WebSession, load_session
+from app.services.web_sessions import WebSession, load_session, role_in
 
 COOKIE = "aop_session"
 _engine: AsyncEngine | None = None
@@ -94,6 +96,45 @@ async def get_current_principal(
 PrincipalDep = Annotated[Principal, Depends(get_current_principal)]
 
 
-async def write_limit(principal: PrincipalDep, redis: RedisDep, clock: ClockDep) -> None:
+async def get_actor(
+    request: Request,
+    engine: EngineDep,
+    redis: RedisDep,
+    clock: ClockDep,
+    authorization: Annotated[str | None, Header()] = None,
+) -> Principal:
+    """A bearer token, else the web session's user in the organization it selected (role read now).
+
+    Cookie-authenticated writes also need the web app's Origin; a bearer token carries no ambient cookie."""
+    if authorization is not None:
+        return await get_current_principal(request, engine, redis, clock, authorization)
+    session = await web_session(request, engine, clock)
+    await require_same_origin(request)
+    org = session.selected_organization_id
+    role = await role_in(engine, session.user_id, org) if org else None
+    if org is None or role is None:
+        raise Forbidden("select an organization first")
+    return UserPrincipal(session.user_id, org, Role[role.upper()])
+
+
+ActorDep = Annotated[Principal, Depends(get_actor)]
+
+
+def require_org_admin(actor: ActorDep) -> UserPrincipal:
+    """Managing members, invitations and the org itself: a person with the org_admin role, never an agent."""
+    if not isinstance(actor, UserPrincipal) or not can(actor.role, Action.MANAGE_ORG):
+        raise Forbidden
+    return actor
+
+
+AdminDep = Annotated[UserPrincipal, Depends(require_org_admin)]
+
+
+async def write_limit(actor: ActorDep, redis: RedisDep, clock: ClockDep) -> None:
     """Dependency for every write route (per principal and per organization)."""
-    await check_write(redis, principal, clock)
+    await check_write(redis, actor, clock)
+
+
+async def user_write_limit(session: SessionDep, redis: RedisDep, clock: ClockDep) -> None:
+    """Same, for writes made before an organization exists."""
+    await check_user_write(redis, session.user_id, clock)

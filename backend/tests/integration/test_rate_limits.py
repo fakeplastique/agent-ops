@@ -76,7 +76,7 @@ def app_with_write_route(r: Redis, clock: FakeClock, principal: AgentPrincipal) 
 
     app.dependency_overrides[deps.get_redis] = lambda: r
     app.dependency_overrides[deps.get_clock] = lambda: clock
-    app.dependency_overrides[deps.get_current_principal] = lambda: principal
+    app.dependency_overrides[deps.get_actor] = lambda: principal
     return app
 
 
