@@ -31,6 +31,10 @@ async def test_the_worker_role_is_not_privileged_and_is_nologin_outside_tests(ow
         )
     )[0]
     assert row == (False, False, False, False)
+    login = await fetch(owner_engine, "select rolcanlogin from pg_roles where rolname='app_worker'")
+    assert login == [
+        (False,)
+    ]  # catches: a known-password worker login left in the cluster (tests use SET ROLE)
     owns = await fetch(
         owner_engine,
         "select count(*) from pg_class c join pg_roles r on r.oid=c.relowner where r.rolname='app_worker'",

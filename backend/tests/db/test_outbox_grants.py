@@ -120,3 +120,68 @@ async def test_a_published_event_is_frozen_even_for_the_owner(app_engine, owner_
         "update outbox_events set type='x' where organization_id=:o",
     ):
         assert await refused(owner_engine, sql, o=org), sql
+
+
+async def test_an_event_is_born_unpublished_and_tied_to_the_counter(app_engine, owner_engine):
+    org = await make_org(owner_engine)
+    async with tenant_session(app_engine, org) as s:
+        await outbox.emit(s, org, "decision.created", {})  # seq 1, counter 1
+    ins = "insert into outbox_events (organization_id, seq, type, payload{extra}) values (:o, :seq, 'x', '{{}}'{val})"
+    # catches: a pre-stamped event (the relay would never send it) or a seq detached from the counter
+    assert await as_tenant_refused(
+        app_engine, org, ins.format(extra=", published_at", val=", now()"), o=org, seq=2
+    )
+    assert await as_tenant_refused(app_engine, org, ins.format(extra="", val=""), o=org, seq=999999)
+    assert await as_tenant_refused(
+        app_engine, org, ins.format(extra="", val=""), o=org, seq=2
+    )  # counter is still 1
+    async with tenant_session(app_engine, org) as s:
+        assert (
+            await outbox.emit(s, org, "decision.created", {}) == 2
+        )  # the normal path is untouched
+
+
+async def test_the_counter_cannot_skip_a_number_or_start_high(app_engine, owner_engine):
+    org, fresh = await make_org(owner_engine), await make_org(owner_engine)
+    async with tenant_session(app_engine, org) as s:
+        await outbox.emit(s, org, "decision.created", {})
+    # a bump without its event leaves a gap: refused when the transaction commits
+    assert await as_tenant_refused(app_engine, org, "update org_event_counters set seq = seq + 1")
+    # a new tenant must start at 1, not at a hole
+    assert await as_tenant_refused(
+        app_engine,
+        fresh,
+        "insert into org_event_counters (organization_id, seq) values (:o, 1000)",
+        o=fresh,
+    )
+    async with tenant_session(app_engine, org) as s:
+        assert await outbox.emit(s, org, "decision.created", {}) == 2
+    async with tenant_session(app_engine, fresh) as s:
+        assert await outbox.emit(s, fresh, "decision.created", {}) == 1
+
+
+async def test_a_counter_and_event_pair_cannot_open_the_sequence_at_a_hole(
+    app_engine, owner_engine
+):
+    # Satisfies the other checks (a matching event exists, the seq equals the counter) but starts at 1000.
+    org = await make_org(owner_engine)
+    try:
+        async with tenant_session(app_engine, org) as s:
+            await s.execute(
+                text("insert into org_event_counters (organization_id, seq) values (:o, 1000)"),
+                {"o": org},
+            )
+            await s.execute(
+                text(
+                    "insert into outbox_events (organization_id, seq, type, payload) values (:o, 1000, 'x', '{}')"
+                ),
+                {"o": org},
+            )
+    except DBAPIError:
+        pass
+    else:
+        raise AssertionError(
+            "a sequence opened at seq 1000"
+        )  # catches: a hole at the start of a tenant's stream
+    async with tenant_session(app_engine, org) as s:
+        assert await outbox.emit(s, org, "decision.created", {}) == 1
