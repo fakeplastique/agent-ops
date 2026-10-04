@@ -142,3 +142,36 @@ async def test_a_revoked_agent_identity_cannot_be_reactivated_by_the_runtime_rol
     assert (
         await fetch(owner_engine, "select status from agent_identities where id=:i", i=w.identity)
     )[0][0] == "revoked"
+
+
+async def test_a_pat_can_only_exist_for_a_member_and_dies_with_the_membership(
+    app_engine, owner_engine
+):
+    from app.authz.resolver import resolve_bearer
+    from app.domain.errors import Unauthenticated
+    from tests.integration.helpers import make_member, make_user
+
+    org = await make_org(owner_engine)
+    outsider = await make_user(owner_engine)
+    ins = "insert into personal_access_tokens (organization_id, user_id, name, token_prefix, token_hash) values (:o, :u, 'x', 'ABCDEFGH', :h)"
+    # catches: a credential for someone who is not in the organization (only the service checked)
+    assert await refused_as(app_engine, org, ins, o=org, u=outsider, h="a" * 64)
+    user = await make_user(owner_engine)
+    await make_member(owner_engine, org, user, "member")
+    async with tenant_session(app_engine, org) as s:
+        _, token = await create_pat(s, org, user, "ci")
+    await resolve_bearer(app_engine, f"Bearer {token}")
+    async with owner_engine.begin() as c:  # removed from the organization, then added back
+        await c.execute(
+            text("delete from memberships where organization_id=:o and user_id=:u"),
+            {"o": org, "u": user},
+        )
+    assert (
+        await fetch(owner_engine, "select 1 from personal_access_tokens where user_id=:u", u=user)
+        == []
+    )
+    await make_member(owner_engine, org, user, "org_admin")
+    with pytest.raises(
+        Unauthenticated
+    ):  # catches: an old token coming back to life when the user is re-added
+        await resolve_bearer(app_engine, f"Bearer {token}")

@@ -2,18 +2,18 @@ from typing import Any
 
 from arq import cron
 from arq.connections import RedisSettings
-from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.adapters.clock import SystemClock
 from app.config import settings
+from app.db.engine import make_engine
 from app.worker.cron import timeouts_job
 from app.worker.relay import relay_once
 
 
 async def startup(ctx: dict[str, Any]) -> None:
     # Two identities (S12-D1): the scan sees ids of due work only, the work runs as the tenant-scoped runtime role.
-    ctx["scan_engine"] = create_async_engine(settings.worker_database_url)
-    ctx["work_engine"] = create_async_engine(settings.database_url)
+    ctx["scan_engine"] = make_engine(settings.worker_database_url)
+    ctx["work_engine"] = make_engine(settings.database_url)
     ctx["clock"] = SystemClock()
 
 

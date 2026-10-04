@@ -232,3 +232,30 @@ async def test_no_token_for_a_revoked_identity_and_revoking_stamps_the_token_row
     with pytest.raises(NotFoundError):  # and for another tenant's identity
         async with tenant_session(app_engine, other.org) as s:
             await issue_agent_token(s, other.org, w.identity)
+
+
+async def test_revoking_twice_changes_nothing_the_second_time(app_engine, owner_engine):
+    w = await make_world(owner_engine)
+    await agent_token(app_engine, w)
+    async with tenant_session(app_engine, w.org) as s:
+        await revoke_agent(s, w.org, w.identity)
+    before = (
+        await fetch(
+            owner_engine, "select updated_at from agent_identities where id=:i", i=w.identity
+        )
+    )[0][0]
+    async with tenant_session(app_engine, w.org) as s:
+        await revoke_agent(s, w.org, w.identity)
+    after = (
+        await fetch(
+            owner_engine, "select updated_at from agent_identities where id=:i", i=w.identity
+        )
+    )[0][0]
+    audits = await fetch(
+        owner_engine,
+        "select 1 from audit_logs where entity_id=:i and action='revoked'",
+        i=w.identity,
+    )
+    assert (
+        before == after and len(audits) == 1
+    )  # catches: a duplicate audit row and a rewritten timestamp

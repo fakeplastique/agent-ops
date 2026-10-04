@@ -34,7 +34,8 @@ def _rls(table: str) -> None:
         f"CREATE POLICY tenant_isolation ON {table} USING (organization_id = {ORG}) WITH CHECK (organization_id = {ORG})"
     )
     # The resolver does not know the tenant yet: it may read the rows whose prefix it names, nothing else.
-    # These tables hold only (tenant, subject, prefix, hash, revoked): never an identity, a user or a role.
+    # What a known prefix reveals is that one credential row: tenant, subject id, (PAT) label, hash, revoked_at.
+    # Never an identity, user or membership row, and the hash is SHA-256 of 256 random bits (not invertible).
     op.execute(
         f"CREATE POLICY lookup_by_prefix ON {table} FOR SELECT USING (token_prefix = {LOOKUP})"
     )
@@ -63,6 +64,13 @@ def upgrade() -> None:
         sa.Column("user_id", UUID, sa.ForeignKey("users.id"), nullable=False),
         sa.Column("name", sa.Text, nullable=False),
         sa.CheckConstraint("char_length(name) BETWEEN 1 AND 80"),
+        # A PAT exists only for a member, and dies with the membership: removing a user kills their tokens for
+        # good, and adding them back does not bring an old token to life.
+        sa.ForeignKeyConstraint(
+            ["organization_id", "user_id"],
+            ["memberships.organization_id", "memberships.user_id"],
+            ondelete="CASCADE",
+        ),
     )
     op.create_index("pat_prefix_idx", "personal_access_tokens", ["token_prefix"])
     op.create_index("pat_user_idx", "personal_access_tokens", ["user_id"])

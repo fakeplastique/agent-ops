@@ -65,8 +65,11 @@ async def revoke_agent(
 ) -> None:  # fmt: skip
     """Revoke the identity and its token: effective on the very next request (the resolver reads the database)."""
     o = organization_id
-    if (await session.execute(_IDENTITY, {"o": o, "i": agent_identity_id})).scalar() is None:
+    status = (await session.execute(_IDENTITY, {"o": o, "i": agent_identity_id})).scalar()
+    if status is None:
         raise NotFoundError
+    if status == "revoked":  # idempotent: no second timestamp, no second audit row
+        return
     await session.execute(_REVOKE_IDENTITY, {"o": o, "i": agent_identity_id})
     await session.execute(_REVOKE_AGENT_TOKEN, {"o": o, "i": agent_identity_id})
     await audit.record(

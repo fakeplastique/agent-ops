@@ -3,9 +3,9 @@ import asyncio
 from fastapi import APIRouter, Response
 from redis.asyncio import Redis
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.config import settings
+from app.db.engine import make_engine
 
 router = APIRouter()
 TIMEOUT = 2  # seconds per dependency; readiness must answer fast
@@ -19,7 +19,7 @@ async def healthz() -> dict[str, str]:
 async def _postgres() -> bool:
     engine = None
     try:
-        engine = create_async_engine(settings.database_url)
+        engine = make_engine(settings.database_url)
         async with asyncio.timeout(TIMEOUT), engine.connect() as conn:
             await conn.execute(text("select 1"))
         return True
