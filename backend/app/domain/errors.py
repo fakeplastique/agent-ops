@@ -41,3 +41,15 @@ class StaleVersion(DomainError):
 
 class VoteNotAllowed(DomainError):
     code = "vote_not_allowed"
+
+
+class AlreadyDecided(DomainError):
+    code = "already_decided"
+
+
+class Forbidden(DomainError):
+    code = "forbidden"
+
+
+class StepNotPending(DomainError):
+    code = "step_not_pending"

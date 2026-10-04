@@ -30,10 +30,24 @@ _RESOLVE = text(
     limit 1
     """
 )
+_OWNER_TEAM = text("select team_id from memberships where organization_id = :o and user_id = :u")
 _PLAN = text(
     "select p.max_quorum, p.max_rounds, p.max_levels from organizations o"
     " join plans p on p.key = o.plan_key where o.id = :o"
 )
+
+
+LEVEL_ROLES = frozenset({"team_lead", "manager", "org_admin"})
+
+
+def _valid_levels(levels: Any) -> bool:
+    return isinstance(levels, list) and all(
+        isinstance(lv, dict)
+        and lv.get("role") in LEVEL_ROLES
+        and type(lv.get("timeout_minutes")) is int
+        and lv["timeout_minutes"] >= 1
+        for lv in levels
+    )
 
 
 async def resolve_policy(
@@ -47,7 +61,16 @@ async def resolve_policy(
     )
     if row is None:
         raise PolicyUnresolved  # no team policy and no org default: nothing may decide this request
+    if not _valid_levels(
+        row["levels"]
+    ):  # fail closed now, not later when the first step cannot open
+        raise PolicyUnresolved
+    owner_team = (
+        await session.execute(_OWNER_TEAM, {"o": organization_id, "u": owner_user_id})
+    ).scalar()
     return {
+        # The requester's own team, frozen with the request: a team_lead step is scoped to it (D16).
+        "owner_team_id": str(owner_team) if owner_team else None,
         "policy_id": str(row["id"]),
         "team_id": str(row["team_id"]) if row["team_id"] else None,
         "quorum_size": row["quorum_size"],

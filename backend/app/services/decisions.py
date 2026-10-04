@@ -24,7 +24,10 @@ from app.domain.transitions import transition
 from app.ports.clock import Clock
 from app.services import audit, outbox
 from app.services.policies import ensure_fits_plan, resolve_policy
+from app.services.status import change_status
+from app.services.steps import open_first_step
 from app.services.usage import consume
+from app.services.validation import check_text as _check_text
 
 TITLE_MAX, DESCRIPTION_MAX, PAYLOAD_MAX = 200, 4096, 65_536  # D21
 
@@ -59,17 +62,6 @@ def _has_nul(value: Any) -> bool:
             stack.extend(v)
             stack.extend(v.values())
     return False
-
-
-def _check_text(name: str, value: Any, low: int, high: int) -> None:
-    ok = isinstance(value, str) and low <= len(value) <= high and "\x00" not in value
-    if ok:
-        try:
-            value.encode("utf-8")  # a lone surrogate would reach asyncpg and fail as a 500
-        except UnicodeEncodeError:
-            ok = False
-    if not ok:
-        raise InvalidInput(f"{name} must be a string of {low} to {high} characters")
 
 
 def _validate(title: Any, description: Any, action_type: Any, payload: Any) -> None:
@@ -203,11 +195,6 @@ _REVEAL = text(
     "update votes set revealed_at = :now where organization_id = :o and decision_request_id = :r"
     " and request_version = :ver and round = 1"
 )
-_SET_STATUS = text(
-    "update decision_requests set status = :new, updated_at = :now, decided_at = :decided,"
-    " receipt = cast(:receipt as jsonb) where organization_id = :o and id = :r and status = :old"
-    " returning id"
-)
 
 
 def _checked_vote(verdict: Any, confidence: Any, rationale: Any, request_version: Any) -> Vote:
@@ -330,16 +317,6 @@ async def _close_round(
         if new is Status.APPROVED
         else None
     )
-    decided = now if new in (Status.APPROVED, Status.REJECTED) else None
-    result = await session.execute(
-        _SET_STATUS,
-        {
-            "o": o, "r": r, "old": old.value, "new": new.value, "now": now, "decided": decided,
-            "receipt": json.dumps(receipt) if receipt else None,
-        },
-    )  # fmt: skip
-    if result.first() is None:  # the lock makes this unreachable; never double-apply if it is not
-        raise IllegalTransitionError("the request changed under the vote")
     await session.execute(_REVEAL, {"o": o, "r": r, "ver": version, "now": now})
     revealed = {
         "decision_request_id": str(r), "round": 1, "request_version": version,
@@ -349,16 +326,7 @@ async def _close_round(
         session, o, "decision_request", r, "round_revealed", "system", None, revealed
     )
     await outbox.emit(session, o, "round.revealed", revealed)
-    change = {"from": old.value, "to": new.value, "version": version}
-    await audit.record(
-        session,
-        o,
-        "decision_request",
-        r,
-        "status_changed",
-        "system",
-        None,
-        change | {"receipt": receipt is not None},
-    )
-    await outbox.emit(session, o, "decision.status_changed", change | {"id": str(r)})
+    await change_status(session, o, r, version, old, new, now, receipt, "system", None)
+    if new is Status.PENDING_APPROVAL:
+        await open_first_step(session, o, r, version, snapshot, now)
     return new.value
