@@ -15,6 +15,7 @@ EXEMPT: set[str] = {
     "/api/v1/auth/logout",
     "/api/v1/auth/session",
     "/api/v1/auth/organization",
+    "/api/v1/me",  # the caller's own principal, no id parameter to swap
 }
 
 
