@@ -14,6 +14,7 @@ from app.api.v1 import (
     receipts,
     steps,
     teams,
+    tokens,
     votes,
 )
 
@@ -32,5 +33,6 @@ api_v1_router.include_router(audit.router)
 api_v1_router.include_router(agents.router)
 api_v1_router.include_router(teams.router)
 api_v1_router.include_router(policies.router)
+api_v1_router.include_router(tokens.router)
 
 __all__ = ["api_v1_router"]
