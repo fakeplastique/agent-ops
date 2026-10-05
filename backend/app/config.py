@@ -15,6 +15,10 @@ class Settings(BaseSettings):
     # The timeout worker's scan identity (ids of due work only). NOLOGIN until an environment provisions it.
     worker_database_url: str = "postgresql+asyncpg://app_worker:app_worker@localhost:5432/agent_ops"
     redis_url: str = "redis://localhost:6379/0"
+    # Fixed one-minute windows (D22). Writes: per principal and per organization; failed bearer auth: per IP.
+    write_limit_per_principal: int = 60
+    write_limit_per_org: int = 300
+    auth_failures_per_minute: int = 20
     # Web login (D7): Google OIDC. The origin is the web app's (the API is reached through its rewrites), so the
     # redirect URI, the cookie and the Origin check all live on it. Empty client id = login unavailable.
     web_origin: str = "http://localhost:3000"

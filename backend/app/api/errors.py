@@ -34,6 +34,9 @@ DOMAIN_STATUS_CODES: dict[type[DomainError], int] = {
     de.DiscussionClosed: 409,
     de.DiscussionRequired: 409,
     de.SessionLimit: 409,
+    de.IdempotencyKeyReuse: 422,
+    de.RateLimited: 429,
+    de.RateLimiterUnavailable: 503,
 }
 
 
@@ -76,9 +79,11 @@ def register_error_handlers(app: FastAPI) -> None:
         code = getattr(exc, "code", "domain_error")
         message = str(exc) or code
         details = getattr(exc, "details", {})
+        retry_after = getattr(exc, "retry_after", None)
         return JSONResponse(
             status_code=status_code,
             content=error_envelope(code=code, message=message, details=details),
+            headers={"Retry-After": str(retry_after)} if retry_after else None,
         )
 
     @app.exception_handler(RequestValidationError)
