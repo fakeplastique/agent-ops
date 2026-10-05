@@ -71,6 +71,8 @@ EXEMPT: set[str] = {
     "/api/v1/me/pending-approvals",  # the caller's own inbox, no id parameter
     # Public by design (PRODUCT 3.2): answers only valid true/false, whoever's receipt it is.
     "/api/v1/receipts/verify",
+    # The tenant comes from the caller; a foreign decision_request_id filter is empty (tests/api/test_audit.py).
+    "/api/v1/audit-logs",
 }
 
 
