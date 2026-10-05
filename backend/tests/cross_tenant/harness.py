@@ -11,6 +11,35 @@ ROUTES: dict[tuple[str, str], str] = {
     ("DELETE", "/api/v1/invitations/{invitation_id}"): "tenant B revokes tenant A's invitation id",
     ("PATCH", "/api/v1/members/{user_id}"): "tenant B changes tenant A's member",
     ("DELETE", "/api/v1/members/{user_id}"): "tenant B removes tenant A's member",
+    # Probed by tests/cross_tenant/test_decisions.py.
+    (
+        "GET",
+        "/api/v1/decision-requests/{decision_request_id}",
+    ): "tenant B reads tenant A's request",
+    (
+        "POST",
+        "/api/v1/decision-requests/{decision_request_id}/revise",
+    ): "tenant B's agent revises tenant A's request",
+    (
+        "POST",
+        "/api/v1/decision-requests/{decision_request_id}/withdraw",
+    ): "tenant B's agent or admin withdraws tenant A's request",
+    (
+        "GET",
+        "/api/v1/decision-requests/{decision_request_id}/votes",
+    ): "tenant B reads tenant A's votes",
+    (
+        "POST",
+        "/api/v1/decision-requests/{decision_request_id}/votes",
+    ): "tenant B's agent votes on tenant A's request",
+    (
+        "GET",
+        "/api/v1/decision-requests/{decision_request_id}/messages",
+    ): "tenant B reads tenant A's discussion",
+    (
+        "POST",
+        "/api/v1/decision-requests/{decision_request_id}/messages",
+    ): "tenant B posts into tenant A's discussion",
 }
 
 # Routes that carry no tenant data.
@@ -29,6 +58,7 @@ EXEMPT: set[str] = {
     "/api/v1/invitations/accept",
     "/api/v1/members",
     "/api/v1/me",  # the caller's own principal, no id parameter to swap
+    "/api/v1/decision-requests",  # create and list: the tenant comes from the caller
 }
 
 
