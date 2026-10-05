@@ -8,6 +8,7 @@ from app.api.v1 import (
     members,
     messages,
     organizations,
+    receipts,
     steps,
     votes,
 )
@@ -22,5 +23,6 @@ api_v1_router.include_router(decisions.router)
 api_v1_router.include_router(votes.router)
 api_v1_router.include_router(messages.router)
 api_v1_router.include_router(steps.router)
+api_v1_router.include_router(receipts.router)
 
 __all__ = ["api_v1_router"]

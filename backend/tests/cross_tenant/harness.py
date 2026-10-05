@@ -45,6 +45,10 @@ ROUTES: dict[tuple[str, str], str] = {
         "POST",
         "/api/v1/approval-steps/{step_id}/decide",
     ): "tenant B's user decides tenant A's step",
+    (
+        "GET",
+        "/api/v1/decision-requests/{decision_request_id}/receipt",
+    ): "tenant B reads tenant A's receipt",
 }
 
 # Routes that carry no tenant data.
@@ -65,6 +69,8 @@ EXEMPT: set[str] = {
     "/api/v1/me",  # the caller's own principal, no id parameter to swap
     "/api/v1/decision-requests",  # create and list: the tenant comes from the caller
     "/api/v1/me/pending-approvals",  # the caller's own inbox, no id parameter
+    # Public by design (PRODUCT 3.2): answers only valid true/false, whoever's receipt it is.
+    "/api/v1/receipts/verify",
 }
 
 

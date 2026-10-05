@@ -1,6 +1,6 @@
 import pytest
 
-from app.api.deps import user_write_limit, write_limit
+from app.api.deps import public_limit, user_write_limit, write_limit
 from app.config import settings
 from tests.cross_tenant.harness import api_routes
 
@@ -30,7 +30,9 @@ def test_every_write_route_is_rate_limited():
     missing = [
         (m, p)
         for m, p, r in unsafe
-        if not (_depends_on(r.dependant, write_limit) or _depends_on(r.dependant, user_write_limit))
+        if not any(
+            _depends_on(r.dependant, lim) for lim in (write_limit, user_write_limit, public_limit)
+        )
     ]
     assert missing == []
 

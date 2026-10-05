@@ -93,9 +93,11 @@ def _checks_origin(dependant) -> bool:
     return _depends_on(dependant, require_same_origin) or _depends_on(dependant, get_actor)
 
 
-# Routes that authenticate with a bearer token only (no ambient cookie): none yet. A new unsafe route is checked
-# by default; listing it here is a decision a reviewer sees.
-BEARER_ONLY: set[tuple[str, str]] = set()
+# Routes that authenticate with a bearer token only (no ambient cookie), or with nothing at all. A new unsafe
+# route is checked by default; listing it here is a decision a reviewer sees.
+BEARER_ONLY: set[tuple[str, str]] = {
+    ("POST", "/api/v1/receipts/verify"),  # public, reads no cookie and changes nothing
+}
 
 
 def test_every_unsafe_route_is_origin_checked_or_declared_bearer_only():

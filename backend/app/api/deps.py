@@ -6,7 +6,7 @@ from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.adapters.clock import SystemClock
-from app.api.ratelimit import auth_failed, check_user_write, check_write
+from app.api.ratelimit import auth_failed, check_ip, check_user_write, check_write
 from app.authz.matrix import Action, Role, can
 from app.authz.origin import require_same_origin
 from app.authz.principals import Principal, UserPrincipal
@@ -138,3 +138,8 @@ async def write_limit(actor: ActorDep, redis: RedisDep, clock: ClockDep) -> None
 async def user_write_limit(session: SessionDep, redis: RedisDep, clock: ClockDep) -> None:
     """Same, for writes made before an organization exists."""
     await check_user_write(redis, session.user_id, clock)
+
+
+async def public_limit(request: Request, redis: RedisDep, clock: ClockDep) -> None:
+    """Same, for a route anyone may call without a credential: counted per client IP."""
+    await check_ip(redis, request.client.host if request.client else "unknown", clock)
