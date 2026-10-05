@@ -8,7 +8,7 @@ from redis.asyncio import Redis
 
 from app.api import deps
 from app.api.errors import register_error_handlers
-from app.api.ratelimit import check_write
+from app.api.ratelimit import auth_failed, check_write
 from app.authz.principals import AgentPrincipal
 from app.config import settings
 from app.domain.errors import RateLimited, RateLimiterUnavailable
@@ -116,12 +116,26 @@ async def test_redis_down_fails_closed_for_writes_with_503():
     await dead.aclose()
 
 
+async def test_concurrent_bad_tokens_cannot_outrun_the_limit(redis):
+    import asyncio
+
+    from app.config import settings as st
+
+    clock = FakeClock(utc(2026, 1, 1))
+    res = await asyncio.gather(
+        *(auth_failed(redis, "9.9.9.9", clock) for _ in range(st.auth_failures_per_minute + 10)),
+        return_exceptions=True,
+    )
+    # catches: check and count as two calls
+    assert sum(isinstance(r, RateLimited) for r in res) == 10
+
+
 async def test_redis_down_does_not_lock_everyone_out_of_login_checks(app_engine, monkeypatch):
     # failed-auth throttling is best effort: tokens are 256-bit, so an outage must not take reads down
-    from app.api.ratelimit import auth_blocked
+    from app.api.ratelimit import auth_failed
 
     dead = Redis.from_url("redis://localhost:1/0", socket_connect_timeout=0.2)
-    await auth_blocked(dead, "1.2.3.4", FakeClock(utc(2026, 1, 1)))
+    await auth_failed(dead, "1.2.3.4", FakeClock(utc(2026, 1, 1)))
     await dead.aclose()
 
 

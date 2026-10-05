@@ -51,21 +51,13 @@ async def check_write(
         raise RateLimited(wait)
 
 
-async def auth_blocked(redis: Redis, ip: str, clock: Clock) -> None:
-    """429 once this IP has failed bearer auth too often this window. Best effort: a Redis outage lets it pass
-    (tokens are 256-bit, and an outage must not take every read down)."""
-    window, wait = _slot(clock.now())
+async def auth_failed(redis: Redis, ip: str, clock: Clock) -> None:
+    """Count one failed bearer auth for this IP; 429 once it is over the limit (count and check are one INCR).
+    Best effort: a Redis outage lets the 401 through (tokens are 256-bit; an outage must not break reads)."""
     try:
-        seen = int(await redis.get(f"rl:af:{ip}:{window}") or 0)
-    except (RedisError, OSError):
-        logger.warning("auth-failure limiter unavailable")
-        return
-    if seen >= settings.auth_failures_per_minute:
-        raise RateLimited(wait)
-
-
-async def record_auth_failure(redis: Redis, ip: str, clock: Clock) -> None:
-    try:
-        await _hit(redis, f"af:{ip}", clock.now())
+        hits, wait = await _hit(redis, f"af:{ip}", clock.now())
     except RateLimiterUnavailable:
         logger.warning("auth-failure limiter unavailable")
+        return
+    if hits > settings.auth_failures_per_minute:
+        raise RateLimited(wait)

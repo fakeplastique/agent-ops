@@ -6,7 +6,7 @@ from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.adapters.clock import SystemClock
-from app.api.ratelimit import auth_blocked, check_write, record_auth_failure
+from app.api.ratelimit import auth_failed, check_write
 from app.authz.principals import Principal
 from app.authz.resolver import resolve_bearer
 from app.config import settings
@@ -87,8 +87,7 @@ async def get_current_principal(
         return (await resolve_bearer(engine, authorization)).principal
     except Unauthenticated:
         # Only a failing caller is throttled: a valid token never is, even behind a shared proxy IP.
-        await auth_blocked(redis, ip, clock)
-        await record_auth_failure(redis, ip, clock)
+        await auth_failed(redis, ip, clock)
         raise
 
 

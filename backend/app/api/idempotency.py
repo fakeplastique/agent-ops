@@ -59,7 +59,9 @@ async def begin(
     body: Any,
     clock: Clock,
 ) -> Replay | None:
-    """Claim the key (None: go ahead and call `finish`) or return the first answer. Same key, other body: 422."""
+    """Claim the key (None: go ahead and call `finish`) or return the first answer. Same key, other body: 422.
+
+    `route` is the concrete method + path (ids included), not the template. A 201 replay must resend Location."""
     _check_key(key)
     now = clock.now()
     ids = {"o": org, "p": principal_id, "k": key, "r": route}
@@ -68,6 +70,8 @@ async def begin(
     if (await session.execute(_CLAIM, {**ids, "h": h, "now": now})).first():
         return None
     stored_hash, status, answer = (await session.execute(_READ, ids)).one()
+    if status is None:  # committed without `finish`: a handler bug, never a replayable answer
+        raise RuntimeError("idempotency key claimed but never finished")
     if stored_hash != h:
         raise IdempotencyKeyReuse
     return Replay(status, answer)
