@@ -72,6 +72,11 @@ async def test_filters_status_risk_agent_q_combine_and_page(web, app_engine, own
     assert [d["id"] for d in cancelled["items"]] == [str(mine[2]["id"])]
     # LIKE metacharacters are literal
     assert (await web.client.get(DR, headers=h, params={"q": "%"})).json()["total"] == 0
+    # a blank q is still a search term (substring " "), never a 4xx
+    every = (await web.client.get(DR, headers=h, params={"limit": 100})).json()["items"]
+    blank = await web.client.get(DR, headers=h, params={"q": " "})
+    assert blank.status_code == 200, blank.text
+    assert blank.json()["total"] == sum(" " in d["title"] for d in every) > 0
     for sort in ("created_at", "-created_at", "updated_at", "-updated_at", "title", "-title"):
         r = await web.client.get(DR, headers=h, params={"sort": sort})
         assert r.status_code == 200 and r.json()["total"] == 6

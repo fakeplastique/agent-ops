@@ -56,7 +56,8 @@ async def get_decision(session: AsyncSession, o: uuid.UUID, r: uuid.UUID) -> dic
 def _like(q: str | None) -> str | None:
     if q is None:
         return None
-    check_text("q", q, 1, 200)  # NUL or a lone surrogate would reach asyncpg as a 500
+    # min 0: a search term may be blank ("" matches all); NUL or a lone surrogate would be a 500
+    check_text("q", q, 0, 200)
     return "%" + q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
 
 
