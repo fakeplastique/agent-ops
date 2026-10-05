@@ -32,16 +32,18 @@ async def decided_rows(owner, req) -> list:
 async def test_decide_idempotent_key_replay_returns_first_and_conflicting_decision_409(
     web, app_engine, owner_engine
 ):
-    w, req, _ = await approval_world(owner_engine, app_engine)
+    # high risk: approving level 1 opens level 2, so a re-run (not a replay) would answer differently
+    w, req, _ = await approval_world(owner_engine, app_engine, high=True)
     step, *_ = await pending_step(owner_engine, req)
     manager = await staff(owner_engine, w.org, "manager")
     h = await user_auth(app_engine, w.org, manager) | {"Idempotency-Key": "d-1"}
     url = f"{STEPS}/{step}/decide"
     first = await web.client.post(url, json=APPROVE, headers=h)
     assert first.status_code == 200, first.text
+    level2, *_ = await pending_step(owner_engine, req)
     assert first.json() == {
-        "step_id": str(step), "status": "approved", "request_status": "approved",
-        "next_step_id": None,
+        "step_id": str(step), "status": "approved", "request_status": "pending_approval",
+        "next_step_id": str(level2),
     }  # fmt: skip
     # catches: double apply on retry (I10)
     again = await web.client.post(url, json=APPROVE, headers=h)
@@ -57,6 +59,16 @@ async def test_decide_idempotent_key_replay_returns_first_and_conflicting_decisi
     )
     assert late.status_code == 409
     assert await decided_rows(owner_engine, req) == [(step, "approved")]
+    assert (
+        len(
+            await fetch(
+                owner_engine,
+                "select id from approval_steps where decision_request_id=:r",
+                r=req["id"],
+            )
+        )
+        == 2
+    )
     audits = await fetch(
         owner_engine,
         "select count(*) from audit_logs where entity_id=:s and action='decided'",
