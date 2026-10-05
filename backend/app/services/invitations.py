@@ -119,16 +119,15 @@ async def accept_invitation(
         ).first()
         if got is None:
             seen = (await c.execute(_PEEK)).first()
-            if (
+            live = (
                 seen is not None
-                and seen.accepted_at is None
-                and seen.revoked_at is None
+                and (seen.accepted_at, seen.revoked_at) == (None, None)
                 and seen.expires_at > now
-            ):
-                if (
-                    seen.email != email
-                ):  # a usable link on the wrong account: say which one it is for
-                    raise InvitationEmailMismatch(seen.email)
+            )
+            if (
+                seen is not None and live and seen.email != email
+            ):  # usable link, wrong account: say whose
+                raise InvitationEmailMismatch(seen.email)
             raise InvitationUnusable
         inv, org, role, team = got
         await use_tenant(c, org)
