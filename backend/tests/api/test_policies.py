@@ -169,3 +169,23 @@ async def test_concurrent_patches_keep_both_fields(app_engine, owner_engine):
         i=made["id"],
     )
     assert rows == [(5, 2)]
+
+
+async def test_after_downgrade_an_admin_can_edit_a_team_policy_down_to_the_plan(
+    web, app_engine, owner_engine
+):
+    org, admin = await _org(app_engine, owner_engine, "enterprise")
+    team = await make_team(owner_engine, org)
+    big = GOOD | {"team_id": str(team), "quorum_size": 9}
+    made = (await web.client.post(EP, json=big, headers=admin)).json()
+    await _exec(owner_engine, "update organizations set plan_key='pro' where id=:o", o=org)
+    one = f"{EP}/{made['id']}"
+    r = await web.client.patch(one, json={"quorum_size": 8}, headers=admin)
+    assert r.status_code == 422 and r.json()["error"]["details"]["limit"] == "quorum_size"
+    # catches: the flag check (402) blocking the edit the spec tells the admin to make
+    r = await web.client.patch(one, json={"quorum_size": 7}, headers=admin)
+    assert r.status_code == 200, r.text
+    # a new team policy still needs the flag
+    other = await make_team(owner_engine, org)
+    r = await web.client.post(EP, json=GOOD | {"team_id": str(other)}, headers=admin)
+    assert r.status_code == 402

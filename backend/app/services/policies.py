@@ -237,7 +237,9 @@ async def update_policy(
     if current is None:
         raise NotFoundError
     merged = {f: fields.get(f, current[f]) for f in FIELDS}
-    await _check(session, org, current["team_id"], merged)
+    # No flag check here: the team was gated at create, and after a downgrade the admin must be able
+    # to edit the policy down to the plan (the above-plan check still applies).
+    await _check(session, org, None, merged)
     row = (
         (await session.execute(_UPDATE, {"o": org, "i": policy_id} | _params(merged)))
         .mappings()
