@@ -6,6 +6,7 @@ from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.adapters.clock import SystemClock
+from app.api.ratelimit import auth_failed, check_write
 from app.authz.principals import Principal
 from app.authz.resolver import resolve_bearer
 from app.config import settings
@@ -74,7 +75,25 @@ SessionDep = Annotated[WebSession, Depends(web_session)]
 
 
 async def get_current_principal(
-    engine: EngineDep, authorization: Annotated[str | None, Header()] = None
+    request: Request,
+    engine: EngineDep,
+    redis: RedisDep,
+    clock: ClockDep,
+    authorization: Annotated[str | None, Header()] = None,
 ) -> Principal:
-    """The bearer-token caller, resolved from the database on every request."""
-    return (await resolve_bearer(engine, authorization)).principal
+    """The bearer-token caller, resolved from the database on every request; failures are counted per IP."""
+    ip = request.client.host if request.client else "unknown"
+    try:
+        return (await resolve_bearer(engine, authorization)).principal
+    except Unauthenticated:
+        # Only a failing caller is throttled: a valid token never is, even behind a shared proxy IP.
+        await auth_failed(redis, ip, clock)
+        raise
+
+
+PrincipalDep = Annotated[Principal, Depends(get_current_principal)]
+
+
+async def write_limit(principal: PrincipalDep, redis: RedisDep, clock: ClockDep) -> None:
+    """Dependency for every write route (per principal and per organization)."""
+    await check_write(redis, principal, clock)

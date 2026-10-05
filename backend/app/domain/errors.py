@@ -90,3 +90,27 @@ class LoginUnavailable(DomainError):
 
     def __init__(self) -> None:
         super().__init__("login is not configured")
+
+
+class IdempotencyKeyReuse(DomainError):
+    code = "idempotency_key_reuse"
+
+    def __init__(self) -> None:
+        super().__init__("this Idempotency-Key was already used with a different request")
+
+
+class RateLimited(DomainError):
+    code = "rate_limited"
+
+    def __init__(self, retry_after: int = 1) -> None:
+        super().__init__("too many requests")
+        self.retry_after = max(1, retry_after)
+
+
+class RateLimiterUnavailable(DomainError):
+    """Writes fail closed when the limiter store is down: an outage must not lift the limit."""
+
+    code = "rate_limiter_unavailable"
+
+    def __init__(self) -> None:
+        super().__init__("rate limiter unavailable")
