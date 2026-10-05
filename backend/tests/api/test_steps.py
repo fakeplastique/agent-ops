@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 from sqlalchemy import text
 
@@ -179,3 +181,19 @@ async def test_agent_token_403_cross_tenant_404(web, app_engine, owner_engine):
     )
     assert r.status_code == 404
     assert await decided_rows(owner_engine, req) == []
+
+
+async def test_concurrent_same_key_decides_once(web, app_engine, owner_engine):
+    w, req, _ = await approval_world(owner_engine, app_engine, high=True)
+    step, *_ = await pending_step(owner_engine, req)
+    manager = await staff(owner_engine, w.org, "manager")
+    h = await user_auth(app_engine, w.org, manager) | {"Idempotency-Key": "race"}
+    url = f"{STEPS}/{step}/decide"
+    # catches: two in-flight retries each opening a level-2 step (D2)
+    out = await asyncio.gather(*(web.client.post(url, json=APPROVE, headers=h) for _ in range(5)))
+    assert {r.status_code for r in out} == {200}, [r.text for r in out]
+    assert all(r.json() == out[0].json() for r in out)  # jsonb reorders keys, values match
+    steps = await fetch(
+        owner_engine, "select level from approval_steps where decision_request_id=:r", r=req["id"]
+    )
+    assert sorted(steps) == [(1,), (2,)]

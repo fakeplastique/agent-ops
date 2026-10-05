@@ -146,3 +146,29 @@ async def test_verify_is_rate_limited_per_ip(web, app_engine, owner_engine, monk
     monkeypatch.setattr(settings, "write_limit_per_principal", 2)
     codes = [(await web.client.post(VERIFY, json={})).status_code for _ in range(3)]
     assert codes == [200, 200, 429]  # catches: an unauthenticated endpoint anyone can hammer
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        r'{"request_id": "x\u0000"}',
+        r'{"request_id": ["a"]}',
+        r'{"request_id": 7}',
+        r'{"request_id": "\ud800"}',
+        r'{"request_id": "00000000-0000-0000-0000-000000000000", "version": 1e308}',
+        r'{"request_id": "00000000-0000-0000-0000-000000000000", "version": 1' + "0" * 5000 + "}",
+    ],
+)
+async def test_verify_hostile_bodies_are_false_never_500(web, payload):
+    body = f'{{"alg": "HS256", "kid": "t1", "payload": {payload}, "signature": "{"0" * 64}"}}'
+    r = await web.client.post(VERIFY, content=body, headers={"Content-Type": "application/json"})
+    assert r.status_code != 500, r.text  # catches: a 500 on garbage (D3)
+    assert r.status_code in (400, 422) or r.json() == {"valid": False}
+
+
+async def test_verify_deeply_nested_body_is_a_clean_answer(web):
+    deep: dict = {}
+    for _ in range(5000):
+        deep = {"a": deep}
+    r = await web.client.post(VERIFY, json={"payload": deep})
+    assert r.status_code in (200, 413, 422) and r.status_code != 500
