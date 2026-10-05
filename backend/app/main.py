@@ -1,10 +1,14 @@
+import re
+import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Response
 
-from app.api import errors, health
-from app.api.v1 import auth
+from app.api import health
+from app.api.errors import register_error_handlers
+from app.api.limits import BodyLimitMiddleware
+from app.api.v1 import api_v1_router
 from app.config import settings
 from app.db.engine import make_engine
 from app.db.guard import assert_safe_role
@@ -21,7 +25,22 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     yield
 
 
+_REQUEST_ID = re.compile(r"[\w-]{1,64}")  # a client-sent id is echoed into logs: bound it
+
 app = FastAPI(title="Agent Ops", lifespan=lifespan)
+app.add_middleware(BodyLimitMiddleware)
+
+
+@app.middleware("http")
+async def request_id_middleware(request: Request, call_next) -> Response:
+    given = request.headers.get("X-Request-ID", "")
+    req_id = given if _REQUEST_ID.fullmatch(given) else str(uuid.uuid4())
+    request.state.request_id = req_id
+    response = await call_next(request)
+    response.headers["X-Request-ID"] = req_id
+    return response
+
+
+register_error_handlers(app)
 app.include_router(health.router)
-app.include_router(auth.router, prefix="/api/v1")
-errors.install(app)
+app.include_router(api_v1_router)

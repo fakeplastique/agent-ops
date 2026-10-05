@@ -1,11 +1,13 @@
 from typing import Annotated
 
 import httpx2
-from fastapi import Depends, Request
+from fastapi import Depends, Header, Request
 from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.adapters.clock import SystemClock
+from app.authz.principals import Principal
+from app.authz.resolver import resolve_bearer
 from app.config import settings
 from app.db.engine import make_engine
 from app.domain.errors import LoginUnavailable, Unauthenticated
@@ -69,3 +71,10 @@ async def web_session(request: Request, engine: EngineDep, clock: ClockDep) -> W
 
 
 SessionDep = Annotated[WebSession, Depends(web_session)]
+
+
+async def get_current_principal(
+    engine: EngineDep, authorization: Annotated[str | None, Header()] = None
+) -> Principal:
+    """The bearer-token caller, resolved from the database on every request."""
+    return (await resolve_bearer(engine, authorization)).principal
