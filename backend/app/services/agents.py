@@ -4,7 +4,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domain.errors import NameTaken, NotFoundError
+from app.domain.errors import AlreadyExists, NotFoundError
 from app.services import audit
 from app.services.tokens import issue_agent_token
 from app.services.validation import check_text
@@ -38,7 +38,7 @@ async def create_agent(
         async with session.begin_nested():
             row = (await session.execute(_INSERT, params)).mappings().one()
     except IntegrityError as e:  # (organization_id, name) is the only unique a valid input can hit
-        raise NameTaken("an agent with this name exists") from e
+        raise AlreadyExists("an agent with this name exists") from e
     await audit.record(session, org, "agent_identity", row["id"], "created", "user", actor)
     return dict(row), await issue_agent_token(session, org, row["id"], actor)
 

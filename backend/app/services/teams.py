@@ -5,7 +5,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domain.errors import InvalidInput, NameTaken, NotFoundError, TeamInUse
+from app.domain.errors import InvalidInput, AlreadyExists, NotFoundError, TeamInUse
 from app.services import audit
 from app.services.validation import check_text
 
@@ -37,7 +37,7 @@ _ANCESTOR = text(
 
 
 def _unique(e: IntegrityError) -> Exception:
-    return NameTaken("a team with this name exists") if _sqlstate(e) == "23505" else e
+    return AlreadyExists("a team with this name exists") if _sqlstate(e) == "23505" else e
 
 
 def _sqlstate(e: IntegrityError) -> str | None:

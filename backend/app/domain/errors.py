@@ -148,8 +148,8 @@ class SlugTaken(DomainError):
     code = "slug_taken"
 
 
-class NameTaken(DomainError):
-    code = "name_taken"
+class AlreadyExists(DomainError):
+    code = "already_exists"
 
 
 class TeamInUse(DomainError):

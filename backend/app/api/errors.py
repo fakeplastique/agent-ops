@@ -39,7 +39,7 @@ DOMAIN_STATUS_CODES: dict[type[DomainError], int] = {
     de.AlreadyMember: 409,
     de.LastOrgAdmin: 409,
     de.SlugTaken: 409,
-    de.NameTaken: 409,
+    de.AlreadyExists: 409,
     de.TeamInUse: 409,
     de.PlanFeatureRequired: 402,
     de.PolicyAbovePlan: 422,
