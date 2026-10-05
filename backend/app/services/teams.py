@@ -54,6 +54,8 @@ async def create_team(
     s: AsyncSession, org: uuid.UUID, actor: uuid.UUID, name: str, parent: uuid.UUID | None
 ) -> dict:
     check_text("name", name, 1, 80)
+    if parent is not None:  # a delete of the parent waits, or this create sees it gone (404, not FK 500)
+        await s.execute(_TREE_LOCK, {"k": f"teams:{org}"})
     await _parent_exists(s, org, parent)
     try:
         async with s.begin_nested():
@@ -106,6 +108,7 @@ async def update_team(
 
 
 async def delete_team(s: AsyncSession, org: uuid.UUID, actor: uuid.UUID, team: uuid.UUID) -> None:
+    await s.execute(_TREE_LOCK, {"k": f"teams:{org}"})  # no create or move under it meanwhile
     try:
         async with s.begin_nested():
             done = (await s.execute(_DELETE, {"o": org, "t": team})).first()

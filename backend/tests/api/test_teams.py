@@ -125,3 +125,22 @@ async def test_team_in_other_org_as_parent_404(web, app_engine, owner_engine):
     assert await fetch(owner_engine, "select parent_team_id from teams where id=:t", t=mine) == [
         (None,)
     ]
+
+
+async def test_create_under_a_parent_being_deleted_is_404_not_500(app_engine, owner_engine):
+    from app.domain.errors import NotFoundError
+
+    w, _ = await _admin(app_engine, owner_engine)
+    p = await make_team(owner_engine, w.org)
+
+    async def create_child():
+        async with tenant_session(app_engine, w.org) as s:
+            await teams.create_team(s, w.org, w.owner_user, "child", p)
+
+    async with tenant_session(app_engine, w.org) as s1:
+        await teams.delete_team(s1, w.org, w.owner_user, p)
+        child = asyncio.create_task(create_child())
+        await asyncio.sleep(0.3)
+    # catches: the FK violation (23503) of a parent deleted under the create surfacing as a 500
+    with pytest.raises(NotFoundError):
+        await child
