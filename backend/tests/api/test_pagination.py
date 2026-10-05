@@ -1,10 +1,9 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Request
-from fastapi.testclient import TestClient
 
 from app.api.pagination import Page, PaginationParams, paginate
-from app.main import app
+from tests.api.harness import probe_client
 
 pagination_router = APIRouter(prefix="/test-pagination")
 
@@ -38,8 +37,7 @@ def list_items(
     return paginate(request, items, total, pagination.skip, pagination.limit)
 
 
-app.include_router(pagination_router)
-client = TestClient(app)
+client = probe_client(pagination_router)
 
 
 def test_limit_0_101_negative_skip_unknown_sort_are_422():

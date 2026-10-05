@@ -50,7 +50,9 @@ def error_envelope(code: str, message: str, details: Any = None) -> dict[str, An
 
 
 def get_status_code_for_domain_error(exc: DomainError) -> int:
-    return DOMAIN_STATUS_CODES.get(type(exc), 500)  # unmapped = our bug: 500, never a misleading 4xx
+    return DOMAIN_STATUS_CODES.get(
+        type(exc), 500
+    )  # unmapped = our bug: 500, never a misleading 4xx
 
 
 def register_error_handlers(app: FastAPI) -> None:

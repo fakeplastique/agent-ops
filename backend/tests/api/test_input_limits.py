@@ -1,8 +1,7 @@
 from fastapi import APIRouter
-from fastapi.testclient import TestClient
 
 from app.api.schemas.base import BaseSchema
-from app.main import app
+from tests.api.harness import probe_client
 
 limits_router = APIRouter(prefix="/test-limits")
 
@@ -16,16 +15,30 @@ def echo_payload(data: SampleInput):
     return {"name": data.name}
 
 
-app.include_router(limits_router)
-client = TestClient(app, raise_server_exceptions=False)
+client = probe_client(limits_router)
 
 
-def test_oversized_body_rejected_before_parsing():
+def test_oversized_content_length_rejected_before_parsing():
     # 2 MB body when default max is 1 MB
     huge_data = b"x" * (2 * 1024 * 1024)
     res = client.post(
         "/test-limits/echo",
         content=huge_data,
+        headers={"Content-Type": "application/json"},
+    )
+    assert res.status_code == 413
+    body = res.json()
+    assert body["error"]["code"] == "payload_too_large"
+
+
+def test_streamed_chunked_oversized_body_returns_413():
+    def chunk_generator():
+        for _ in range(30):
+            yield b"x" * (64 * 1024)  # 30 * 64KB = 1.92 MB
+
+    res = client.post(
+        "/test-limits/echo",
+        content=chunk_generator(),
         headers={"Content-Type": "application/json"},
     )
     assert res.status_code == 413
