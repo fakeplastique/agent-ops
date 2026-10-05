@@ -53,6 +53,9 @@ ROUTES: dict[tuple[str, str], str] = {
     ("GET", "/api/v1/agents/{agent_id}"): "tenant B reads tenant A's agent",
     ("DELETE", "/api/v1/agents/{agent_id}"): "tenant B revokes tenant A's agent",
     ("POST", "/api/v1/agents/{agent_id}/rotate"): "tenant B mints a token for tenant A's agent",
+    ("GET", "/api/v1/teams/{team_id}"): "tenant B reads tenant A's team",
+    ("PATCH", "/api/v1/teams/{team_id}"): "tenant B renames or moves tenant A's team",
+    ("DELETE", "/api/v1/teams/{team_id}"): "tenant B deletes tenant A's team",
 }
 
 # Routes that carry no tenant data.
@@ -78,6 +81,7 @@ EXEMPT: set[str] = {
     # The tenant comes from the caller; a foreign decision_request_id filter is empty (tests/api/test_audit.py).
     "/api/v1/audit-logs",
     "/api/v1/agents",  # create and list: the tenant comes from the caller
+    "/api/v1/teams",  # same; a foreign parent_team_id is 404 (tests/api/test_teams.py)
 }
 
 

@@ -12,6 +12,7 @@ from app.api.v1 import (
     organizations,
     receipts,
     steps,
+    teams,
     votes,
 )
 
@@ -28,5 +29,6 @@ api_v1_router.include_router(steps.router)
 api_v1_router.include_router(receipts.router)
 api_v1_router.include_router(audit.router)
 api_v1_router.include_router(agents.router)
+api_v1_router.include_router(teams.router)
 
 __all__ = ["api_v1_router"]
