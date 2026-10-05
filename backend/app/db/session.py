@@ -13,7 +13,7 @@ async def use_tenant(conn: AsyncConnection, org_id: uuid.UUID) -> None:
     )
 
 
-LOOKUP_KEYS = frozenset({"app.self_user_id", "app.invite_hash"})
+LOOKUP_KEYS = frozenset({"app.self_user_id", "app.invite_hash", "app.receipt_request_id"})
 
 
 async def lookup_as(conn: AsyncConnection, key: str, value: str) -> None:

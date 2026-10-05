@@ -1,9 +1,21 @@
 import uuid
 from typing import Any
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models import AuditLog
+
+# A request's trail also holds its votes, steps and messages, which name it in `data`.
+_WHERE = (
+    " from audit_logs where organization_id = :o and (cast(:r as uuid) is null"
+    " or entity_id = :r or data->>'decision_request_id' = cast(:r as text))"
+)
+_LIST = text(
+    "select id, entity_type, entity_id, action, actor_type, actor_id, data, created_at"
+    f"{_WHERE} order by created_at, id limit :limit offset :skip"
+)
+_COUNT = text(f"select count(*){_WHERE}")
 
 
 async def record(
@@ -29,3 +41,17 @@ async def record(
         )
     )
     await session.flush()
+
+
+async def list_entries(
+    session: AsyncSession,
+    o: uuid.UUID,
+    decision_request_id: uuid.UUID | None,
+    skip: int,
+    limit: int,
+) -> tuple[list[dict[str, Any]], int]:
+    """The organization's audit trail, oldest first. Round-1 vote rows never held a verdict to show."""
+    p = {"o": o, "r": decision_request_id}
+    rows = await session.execute(_LIST, p | {"skip": skip, "limit": limit})
+    total = (await session.execute(_COUNT, p)).scalar_one()
+    return [dict(r) for r in rows.mappings()], total

@@ -59,6 +59,13 @@ async def check_user_write(redis: Redis, user_id: uuid.UUID, clock: Clock) -> No
         raise RateLimited(wait)
 
 
+async def check_ip(redis: Redis, ip: str, clock: Clock) -> None:
+    """Unauthenticated writes (receipt verification), counted per client IP."""
+    hits, wait = await _hit(redis, f"w:ip:{ip}", clock.now())
+    if hits > settings.write_limit_per_principal:
+        raise RateLimited(wait)
+
+
 async def auth_failed(redis: Redis, ip: str, clock: Clock) -> None:
     """Count one failed bearer auth for this IP; 429 once it is over the limit (count and check are one INCR).
     Best effort: a Redis outage lets the 401 through (tokens are 256-bit; an outage must not break reads)."""

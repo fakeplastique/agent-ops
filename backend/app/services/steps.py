@@ -49,6 +49,19 @@ _DECIDE = text(
     "update approval_steps set status = :new, approver_user_id = :u, comment = :c, decided_at = :now"
     " where organization_id = :o and id = :s and status = 'pending' returning id"
 )
+_INBOX_FIELDS = (
+    "id", "decision_request_id", "request_version", "level", "required_role", "due_at", "title",
+    "effective_risk_level", "requested_by_agent_id",
+)  # fmt: skip
+_OPEN_STEPS = text(
+    "select s.id, s.decision_request_id, s.request_version, s.level, s.required_role, s.due_at, d.title,"
+    " d.effective_risk_level, a.agent_identity_id as requested_by_agent_id, d.requested_by_user_id,"
+    " d.requested_by_session_id, d.policy_snapshot from approval_steps s join decision_requests d"
+    " on d.organization_id = s.organization_id and d.id = s.decision_request_id"
+    " left join agent_sessions a on a.organization_id = d.organization_id and a.id = d.requested_by_session_id"
+    " where s.organization_id = :o and s.status = 'pending' and d.status = 'pending_approval'"
+    " and s.request_version = d.version order by s.due_at, s.id"
+)
 _INSERT_STEP = text(
     "insert into approval_steps (organization_id, decision_request_id, request_version, level,"
     " required_role, due_at, stands_in_for_level) values (:o, :r, :v, :level, :role, :due, :stands) returning id"
@@ -86,6 +99,60 @@ async def open_first_step(
 
 def _role(name: str) -> Role:
     return Role[name.upper()]
+
+
+async def _teams(session: AsyncSession, o: uuid.UUID) -> dict[uuid.UUID, uuid.UUID | None]:
+    return {t.id: t.parent_team_id for t in (await session.execute(_TEAMS, {"o": o})).all()}
+
+
+def _led(role: Role, team_id: uuid.UUID | None) -> frozenset[uuid.UUID]:
+    return frozenset({team_id}) if role is Role.TEAM_LEAD and team_id else frozenset()
+
+
+async def _facts(
+    session: AsyncSession, o: uuid.UUID, req: Any, required_role: str,
+    prior: frozenset[uuid.UUID], teams: dict[uuid.UUID, uuid.UUID | None],
+) -> StepFacts:  # fmt: skip
+    """What separation of duties needs about a request; shared by deciding and by the inbox."""
+    owner_id = None
+    if req["requested_by_session_id"] is not None:
+        owner_id = (
+            await session.execute(_AGENT_OWNER, {"o": o, "s": req["requested_by_session_id"]})
+        ).scalar()
+    owner_team = req["policy_snapshot"].get("owner_team_id")
+    return StepFacts(
+        organization_id=o,
+        required_role=_role(required_role),
+        requested_by_user_id=req["requested_by_user_id"],
+        agent_owner_id=owner_id,
+        request_team_id=uuid.UUID(owner_team) if owner_team else None,
+        team_parents=teams,
+        prior_decider_ids=prior,
+    )
+
+
+async def pending_for(session: AsyncSession, o: uuid.UUID, user_id: uuid.UUID) -> list[dict]:
+    """Pending steps of current versions that this user may decide now, by due time (the same rule as
+    decide_step, with role and team read from the database)."""
+    member = (await session.execute(_MEMBER, {"o": o, "u": user_id})).first()
+    if member is None:
+        return []
+    role = _role(member.role)
+    me, led, teams = (
+        UserPrincipal(user_id, o, role),
+        _led(role, member.team_id),
+        await _teams(session, o),
+    )
+    out = []
+    # ponytail: a few queries per open step, filtered in Python; push into SQL if inboxes get long.
+    for row in (await session.execute(_OPEN_STEPS, {"o": o})).mappings():
+        deciders = await session.execute(
+            _DECIDERS, {"o": o, "r": row["decision_request_id"], "v": row["request_version"]}
+        )
+        prior = frozenset(d.approver_user_id for d in deciders)
+        if may_decide(me, await _facts(session, o, row, row["required_role"], prior, teams), led):
+            out.append({k: row[k] for k in _INBOX_FIELDS})
+    return out
 
 
 async def decide_step(
@@ -158,24 +225,8 @@ async def decide_step(
     prior = frozenset(d.approver_user_id for d in deciders)
     if who.user_id in prior:
         raise AlreadyDecided  # one decision per user and version (S11): 409, the step stays pending
-    owner_id = None
-    if req["requested_by_session_id"] is not None:
-        owner_id = (
-            await session.execute(_AGENT_OWNER, {"o": o, "s": req["requested_by_session_id"]})
-        ).scalar()
-    teams = {t.id: t.parent_team_id for t in (await session.execute(_TEAMS, {"o": o})).all()}
-    owner_team = snapshot.get("owner_team_id")
-    facts = StepFacts(
-        organization_id=o,
-        required_role=_role(step["required_role"]),
-        requested_by_user_id=req["requested_by_user_id"],
-        agent_owner_id=owner_id,
-        request_team_id=uuid.UUID(owner_team) if owner_team else None,
-        team_parents=teams,
-        prior_decider_ids=prior,
-    )
-    led = frozenset({team_id}) if role is Role.TEAM_LEAD and team_id else frozenset()
-    if not may_decide(fresh, facts, led):
+    facts = await _facts(session, o, req, step["required_role"], prior, await _teams(session, o))
+    if not may_decide(fresh, facts, _led(role, team_id)):
         raise Forbidden("not allowed to decide this step")
 
     now = clock.now()
