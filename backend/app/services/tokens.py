@@ -130,7 +130,9 @@ async def list_pats(
 async def get_pat(
     session: AsyncSession, org: uuid.UUID, user_id: uuid.UUID, pat_id: uuid.UUID
 ) -> dict:
-    row = (await session.execute(_ONE_PAT, {"o": org, "u": user_id, "t": pat_id})).mappings().first()
+    row = (
+        (await session.execute(_ONE_PAT, {"o": org, "u": user_id, "t": pat_id})).mappings().first()
+    )
     if row is None:
         raise NotFoundError
     return dict(row)

@@ -62,9 +62,7 @@ def test_every_registered_route_is_real_and_fillable():
 
 async def _tenant_a(owner, app_engine):
     """One of everything tenant A owns that a route can name; returns (ids, receipt request, A headers)."""
-    w = await make_world(
-        owner, "pro", floors={"refund": "medium", "note": "low"}, levels=LEVELS3
-    )
+    w = await make_world(owner, "pro", floors={"refund": "medium", "note": "low"}, levels=LEVELS3)
     team = await make_team(owner, w.org)
     await _exec(
         owner, "update memberships set team_id=:t where organization_id=:o and user_id=:u",
@@ -75,9 +73,9 @@ async def _tenant_a(owner, app_engine):
     for s in await voters(owner, w, 3):
         await cast(app_engine, w, escalated, s)
         await cast(app_engine, w, approved, s)
-    assert await fetch(owner, "select status from decision_requests where id=:r", r=approved["id"]) == [
-        ("approved",)
-    ]
+    assert await fetch(
+        owner, "select status from decision_requests where id=:r", r=approved["id"]
+    ) == [("approved",)]
     step, *_ = await pending_step(owner, escalated)
     admin = await staff(owner, w.org, "org_admin")
     async with tenant_session(app_engine, w.org) as s:

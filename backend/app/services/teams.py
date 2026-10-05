@@ -5,7 +5,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domain.errors import InvalidInput, AlreadyExists, NotFoundError, TeamInUse
+from app.domain.errors import AlreadyExists, InvalidInput, NotFoundError, TeamInUse
 from app.services import audit
 from app.services.validation import check_text
 
@@ -22,7 +22,7 @@ _UPDATE = text(
     "update teams set name = :n, parent_team_id = :p, updated_at = now()"
     f" where organization_id = :o and id = :t returning {_COLS}"
 )
-# One tree writer per organization: two moves that are each fine alone cannot both pass the check below.
+# One tree writer per organization: two moves that are each fine alone cannot both pass the cycle check.
 # Transaction-scoped; READ COMMITTED lets the waiter's next statement see the move it waited for.
 _TREE_LOCK = text("select pg_advisory_xact_lock(hashtextextended(:k, 0))")
 _DELETE = text("delete from teams where organization_id = :o and id = :t returning id")
@@ -82,8 +82,8 @@ async def update_team(
     s: AsyncSession, org: uuid.UUID, actor: uuid.UUID, team: uuid.UUID, fields: dict[str, Any]
 ) -> dict:
     """Rename and/or move; a move that would make the team its own ancestor is rejected."""
-    if "parent_team_id" in fields:
-        await s.execute(_TREE_LOCK, {"k": f"teams:{org}"})
+    # Every update, not only moves: a rename rewrites the parent it read, so it must read after any move.
+    await s.execute(_TREE_LOCK, {"k": f"teams:{org}"})
     current = await get_team(s, org, team)
     name = fields.get("name", current["name"])
     parent = fields.get("parent_team_id", current["parent_team_id"])

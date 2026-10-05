@@ -34,7 +34,13 @@ async def test_team_tree_crud(web, app_engine, owner_engine):
     assert renamed.json()["name"] == "Pay" and renamed.json()["parent_team_id"] is None
     listed = await web.client.get(TM, headers=await agent_auth(app_engine, w.org, w.identity))
     assert listed.status_code == 200 and listed.json()["total"] == 2
-    for bad in ({"name": ""}, {"name": "x" * 81}, {"name": "a", "colour": "red"}, {"name": None}):
+    for bad in (
+        {"name": ""},
+        {"name": " \t "},
+        {"name": "x" * 81},
+        {"name": "a", "colour": "red"},
+        {"name": None},
+    ):
         assert (await web.client.post(TM, json=bad, headers=admin)).status_code == 422, bad
     # a team with a sub-team (or members, a policy) cannot vanish under them
     await web.client.patch(one, json={"parent_team_id": root.json()["id"]}, headers=admin)
@@ -62,7 +68,9 @@ async def test_parent_cycle_rejected_including_via_concurrent_moves(web, app_eng
     b = await make_team(owner_engine, w.org, parent=a)
     c = await make_team(owner_engine, w.org, parent=b)
     for team, parent in ((a, a), (a, c), (a, b)):
-        r = await web.client.patch(f"{TM}/{team}", json={"parent_team_id": str(parent)}, headers=admin)
+        r = await web.client.patch(
+            f"{TM}/{team}", json={"parent_team_id": str(parent)}, headers=admin
+        )
         assert r.status_code == 422, r.text  # catches: a loop that hangs policy resolution
     x, y = await make_team(owner_engine, w.org), await make_team(owner_engine, w.org)
     # Two moves that are each fine alone, together a loop: x under y while y goes under x.
@@ -78,6 +86,25 @@ async def test_parent_cycle_rejected_including_via_concurrent_moves(web, app_eng
         owner_engine, "select id, parent_team_id from teams where id in (:x, :y)", x=x, y=y
     )
     assert dict(rows) == {x: y, y: None}
+
+
+async def test_rename_during_a_move_keeps_the_move(app_engine, owner_engine):
+    w, _ = await _admin(app_engine, owner_engine)
+    a = await make_team(owner_engine, w.org)
+    b = await make_team(owner_engine, w.org, parent=a)
+    async with tenant_session(app_engine, w.org) as s1:
+        await teams.update_team(s1, w.org, w.owner_user, b, {"parent_team_id": None})
+        rename = asyncio.create_task(_update(app_engine, w, b, {"name": "renamed"}))
+        await asyncio.sleep(0.3)
+    await rename
+    # catches: a rename writing back the parent it read before the move (a stale parent can close a loop)
+    rows = await fetch(owner_engine, "select name, parent_team_id from teams where id=:b", b=b)
+    assert rows == [("renamed", None)]
+
+
+async def _update(app_engine, w, team, fields):
+    async with tenant_session(app_engine, w.org) as s:
+        await teams.update_team(s, w.org, w.owner_user, team, fields)
 
 
 async def _move(app_engine, w, team, parent):

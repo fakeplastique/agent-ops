@@ -4,10 +4,10 @@ from tests.api.harness import agent_auth, user_auth
 from tests.integration.helpers import (
     _exec,
     fetch,
+    make_member,
     make_org,
     make_team,
     make_user,
-    make_member,
     staff,
 )
 
@@ -16,6 +16,10 @@ pytestmark = pytest.mark.anyio
 EP = "/api/v1/escalation-policies"
 LEVEL = {"role": "manager", "timeout_minutes": 60}
 GOOD = {"name": "default", "quorum_size": 3, "levels": [LEVEL], "risk_floors": {"refund": "high"}}
+GOOD_FIELDS = GOOD | {
+    "require_distinct_agents": True, "rounds": 1, "confidence_threshold": 0.8,
+    "voting_timeout_minutes": 60,
+}  # fmt: skip
 
 
 async def _org(app_engine, owner_engine, plan="free"):
@@ -76,7 +80,9 @@ async def test_policy_above_plan_422_inline_details_and_team_policy_needs_flag_4
     assert r.status_code == 402, r.text
     assert r.json()["error"]["details"] == {"flag": "team_policies", "required_plan": "enterprise"}
     await _exec(owner_engine, "update organizations set plan_key='enterprise' where id=:o", o=org)
-    r = await web.client.post(EP, json=GOOD | {"team_id": str(team), "quorum_size": 9}, headers=admin)
+    r = await web.client.post(
+        EP, json=GOOD | {"team_id": str(team), "quorum_size": 9}, headers=admin
+    )
     assert r.status_code == 201, r.text  # enterprise: any quorum, team policies on
     foreign = await make_team(owner_engine, await make_org(owner_engine, "enterprise"))
     # catches: a policy pinned to another tenant's team (409 or 500 would confirm it exists)
@@ -118,7 +124,11 @@ async def test_risk_floors_and_levels_validated(web, app_engine, owner_engine):
         r = await web.client.post(EP, json=GOOD | over, headers=admin)
         # catches: a level with an unknown role or zero timeout (a step that never opens or never ends)
         assert r.status_code == 422, (over, r.text)
-    assert (await fetch(owner_engine, "select 1 from escalation_policies where organization_id=:o", o=org)) == []
+    assert (
+        await fetch(
+            owner_engine, "select 1 from escalation_policies where organization_id=:o", o=org
+        )
+    ) == []
     ok = GOOD | {"confidence_threshold": 1, "rounds": 2, "levels": [LEVEL, LEVEL]}
     assert (await web.client.post(EP, json=ok, headers=admin)).status_code == 201
 
@@ -130,3 +140,32 @@ async def test_agent_cannot_write_policies(web, app_engine, owner_engine):
     h = await agent_auth(app_engine, w.org, w.identity)
     assert (await web.client.post(EP, json=GOOD, headers=h)).status_code == 403
     assert (await web.client.get(f"{EP}/{w.policy}", headers=h)).status_code == 200
+
+
+async def test_concurrent_patches_keep_both_fields(app_engine, owner_engine):
+    import asyncio
+
+    from app.db.session import tenant_session
+    from app.services import policies
+
+    org, _ = await _org(app_engine, owner_engine, "pro")
+    user = await make_user(owner_engine)
+    async with tenant_session(app_engine, org) as s:
+        made = await policies.create_policy(s, org, user, None, GOOD_FIELDS)
+
+    async def patch(fields):
+        async with tenant_session(app_engine, org) as s:
+            await policies.update_policy(s, org, user, made["id"], fields)
+
+    async with tenant_session(app_engine, org) as s1:
+        await policies.update_policy(s1, org, user, made["id"], {"quorum_size": 5})
+        other = asyncio.create_task(patch({"rounds": 2}))
+        await asyncio.sleep(0.3)
+    await other
+    # catches: the second PATCH merging into the row it read before the first committed (lost update)
+    rows = await fetch(
+        owner_engine,
+        "select quorum_size, rounds from escalation_policies where id=:i",
+        i=made["id"],
+    )
+    assert rows == [(5, 2)]

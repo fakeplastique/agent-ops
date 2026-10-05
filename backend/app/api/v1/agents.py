@@ -40,9 +40,7 @@ class AgentCreated(AgentOut):
     token: str  # shown once
 
 
-@router.post(
-    "", status_code=201, response_model=AgentCreated, dependencies=[Depends(write_limit)]
-)
+@router.post("", status_code=201, response_model=AgentCreated, dependencies=[Depends(write_limit)])
 async def create(
     body: AgentIn, response: Response, admin: AdminDep, engine: EngineDep
 ) -> AgentCreated:

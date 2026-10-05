@@ -16,7 +16,7 @@ async def _admin(app_engine, owner_engine):
 async def test_token_only_in_create_and_rotate_response_never_in_get_or_list(
     web, app_engine, owner_engine
 ):
-    w, admin = await _admin(app_engine, owner_engine)
+    _, admin = await _admin(app_engine, owner_engine)
     made = await web.client.post(AG, json={"name": "bot", "vendor": "acme"}, headers=admin)
     assert made.status_code == 201, made.text
     agent, token = made.json()["id"], made.json()["token"]
@@ -64,6 +64,7 @@ async def test_agent_input_validated(web, app_engine, owner_engine):
     w, admin = await _admin(app_engine, owner_engine)
     for body in (
         {"name": ""},
+        {"name": "   "},  # whitespace-only reads as empty in every list
         {"name": "x" * 81},
         {"name": "a\x00b"},
         {"name": "ok", "token_hash": "f" * 64},

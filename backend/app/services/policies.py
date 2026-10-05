@@ -64,6 +64,9 @@ _LIST = text(
     " order by team_id nulls first, name, id offset :skip limit :limit"
 )
 _ONE = text(f"select {_COLS} from escalation_policies where organization_id = :o and id = :i")
+_LOCK_ONE = text(
+    f"select {_COLS} from escalation_policies where organization_id = :o and id = :i for update"
+)
 _TEAM = text("select 1 from teams where organization_id = :o and id = :t")
 _INSERT = text(
     f"insert into escalation_policies (organization_id, team_id, {', '.join(FIELDS)}) values (:o, :t, "
@@ -75,7 +78,9 @@ _UPDATE = text(
     + ", ".join(f"{f} = cast(:{f} as jsonb)" if f in _JSON else f"{f} = :{f}" for f in FIELDS)
     + f", updated_at = now() where organization_id = :o and id = :i returning {_COLS}"
 )
-_DELETE = text("delete from escalation_policies where organization_id = :o and id = :i returning id")
+_DELETE = text(
+    "delete from escalation_policies where organization_id = :o and id = :i returning id"
+)
 TEAM_FLAG = "team_policies"
 
 
@@ -165,7 +170,9 @@ def _validate(policy: dict[str, Any]) -> None:
     if type(policy["require_distinct_agents"]) is not bool:
         raise InvalidInput("require_distinct_agents must be true or false")
     if not policy["levels"] or not _valid_levels(policy["levels"]):
-        raise InvalidInput("levels need a role (team_lead, manager, org_admin) and timeout_minutes >= 1")
+        raise InvalidInput(
+            "levels need a role (team_lead, manager, org_admin) and timeout_minutes >= 1"
+        )
     floors = policy["risk_floors"]
     if not isinstance(floors, dict) or not all(
         isinstance(k, str) and ACTION_TYPE.fullmatch(k) and v in RISKS for k, v in floors.items()
@@ -225,7 +232,10 @@ async def update_policy(
     fields: dict[str, Any],
 ) -> dict:  # fmt: skip
     """Merge the sent fields and re-check the whole policy: edits cannot sneak past the plan."""
-    current = await get_policy(session, org, policy_id)
+    # Row lock before the merge: a concurrent PATCH must merge into this one's result, not the old row.
+    current = (await session.execute(_LOCK_ONE, {"o": org, "i": policy_id})).mappings().first()
+    if current is None:
+        raise NotFoundError
     merged = {f: fields.get(f, current[f]) for f in FIELDS}
     await _check(session, org, current["team_id"], merged)
     row = (
