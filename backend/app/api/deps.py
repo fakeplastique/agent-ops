@@ -83,10 +83,11 @@ async def get_current_principal(
 ) -> Principal:
     """The bearer-token caller, resolved from the database on every request; failures are counted per IP."""
     ip = request.client.host if request.client else "unknown"
-    await auth_blocked(redis, ip, clock)
     try:
         return (await resolve_bearer(engine, authorization)).principal
     except Unauthenticated:
+        # Only a failing caller is throttled: a valid token never is, even behind a shared proxy IP.
+        await auth_blocked(redis, ip, clock)
         await record_auth_failure(redis, ip, clock)
         raise
 

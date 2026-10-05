@@ -123,3 +123,23 @@ async def test_redis_down_does_not_lock_everyone_out_of_login_checks(app_engine,
     dead = Redis.from_url("redis://localhost:1/0", socket_connect_timeout=0.2)
     await auth_blocked(dead, "1.2.3.4", FakeClock(utc(2026, 1, 1)))
     await dead.aclose()
+
+
+async def test_valid_token_still_works_while_its_ip_is_throttled(
+    web, app_engine, owner_engine, monkeypatch
+):
+    from app.db.session import tenant_session
+    from app.services.tokens import issue_agent_token
+
+    from .helpers import make_world
+
+    w = await make_world(owner_engine)
+    async with tenant_session(app_engine, w.org) as s:
+        token = await issue_agent_token(s, w.org, w.identity)
+    monkeypatch.setattr(settings, "auth_failures_per_minute", 2)
+    bad = {"Authorization": "Bearer pat_" + "x" * 43}
+    for _ in range(3):
+        await web.client.get("/api/v1/me", headers=bad)
+    # catches: one attacker behind a shared proxy IP locking out every valid caller
+    good = await web.client.get("/api/v1/me", headers={"Authorization": f"Bearer {token}"})
+    assert good.status_code == 200
