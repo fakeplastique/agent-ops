@@ -105,10 +105,11 @@ def api_routes(router, prefix: str = ""):
 
 
 def unregistered(app: FastAPI) -> list[tuple[str, str]]:
-    registered = {path for _, path in ROUTES}
+    # (method, path): a new method on a listed path is a new way in and needs its own row
     return sorted(
         (m, path)
         for path, r in api_routes(app)
-        if path not in EXEMPT and path not in registered
+        if path not in EXEMPT
         for m in (r.methods or ())
+        if (m, path) not in ROUTES
     )
