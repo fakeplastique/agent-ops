@@ -8,7 +8,7 @@ from sqlalchemy import text
 
 from app.config import settings
 
-from .helpers import fetch, make_member, make_org
+from .helpers import fetch, make_member, make_org, staff
 from .web_harness import ORIGIN
 
 pytestmark = pytest.mark.anyio
@@ -366,6 +366,9 @@ async def test_removed_membership_loses_access_on_next_request(web, owner_engine
     org = await make_org(owner_engine)
     uid = await user_id(owner_engine, addr)
     await make_member(owner_engine, org, uid, "org_admin")
+    await staff(
+        owner_engine, org, "org_admin"
+    )  # an organization keeps one admin: someone else stays
     await web.post("/api/v1/auth/organization", json={"organization_id": str(org)})
     assert (await session_info(web)).json()["role"] == "org_admin"
     async with owner_engine.begin() as c:
@@ -387,6 +390,7 @@ async def test_role_changes_apply_on_the_next_request_and_a_switch_leaks_nothing
     a, b = await make_org(owner_engine), await make_org(owner_engine)
     uid = await user_id(owner_engine, addr)
     await make_member(owner_engine, a, uid, "org_admin")
+    await staff(owner_engine, a, "org_admin")  # an organization keeps one admin: someone else stays
     await make_member(owner_engine, b, uid, "member")
     await web.post("/api/v1/auth/organization", json={"organization_id": str(a)})
     assert (await session_info(web)).json()["role"] == "org_admin"

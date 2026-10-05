@@ -114,3 +114,35 @@ class RateLimiterUnavailable(DomainError):
 
     def __init__(self) -> None:
         super().__init__("rate limiter unavailable")
+
+
+class InvitationUnusable(DomainError):
+    """Unknown, expired, used and revoked look the same: the link holder learns nothing about its state."""
+
+    code = "invitation_unusable"
+
+    def __init__(self) -> None:
+        super().__init__("This invitation can't be used")
+
+
+class InvitationEmailMismatch(DomainError):
+    code = "invitation_email_mismatch"
+
+    def __init__(self, invited_email: str = "") -> None:
+        super().__init__("this invitation is for a different account")
+        self.details = {"invited_email": invited_email}
+
+
+class AlreadyMember(DomainError):
+    code = "already_member"
+
+
+class LastOrgAdmin(DomainError):
+    code = "last_org_admin"
+
+    def __init__(self) -> None:
+        super().__init__("an organization keeps at least one org_admin")
+
+
+class SlugTaken(DomainError):
+    code = "slug_taken"

@@ -86,6 +86,13 @@ def _depends_on(dependant, target) -> bool:
     return any(d.call is target or _depends_on(d, target) for d in dependant.dependencies)
 
 
+def _checks_origin(dependant) -> bool:
+    # get_actor runs the Origin check itself when the caller is a cookie session (a bearer carries no cookie).
+    from app.api.deps import get_actor
+
+    return _depends_on(dependant, require_same_origin) or _depends_on(dependant, get_actor)
+
+
 # Routes that authenticate with a bearer token only (no ambient cookie): none yet. A new unsafe route is checked
 # by default; listing it here is a decision a reviewer sees.
 BEARER_ONLY: set[tuple[str, str]] = set()
@@ -105,6 +112,25 @@ def test_every_unsafe_route_is_origin_checked_or_declared_bearer_only():
     missing = [
         (m, path)
         for m, path, r in unsafe
-        if (m, path) not in BEARER_ONLY and not _depends_on(r.dependant, require_same_origin)
+        if (m, path) not in BEARER_ONLY and not _checks_origin(r.dependant)
     ]
     assert missing == []  # catches: a cookie-authenticated write without the Origin check (FM36)
+
+
+async def test_actor_routes_check_origin_for_cookie_sessions_only(web, owner_engine):
+    from tests.integration.helpers import make_member, make_org
+
+    await web.login("origin-check@example.test")
+    org = await make_org(owner_engine)
+    from sqlalchemy import text
+
+    async with owner_engine.begin() as c:
+        uid = (
+            await c.execute(text("select id from users where email='origin-check@example.test'"))
+        ).scalar()
+    await make_member(owner_engine, org, uid, "org_admin")
+    await web.post("/api/v1/auth/organization", json={"organization_id": str(org)})
+    body = {"email": "x@example.test", "role": "member"}
+    for origin in (None, "https://evil.test"):
+        assert (await web.post("/api/v1/invitations", origin=origin, json=body)).status_code == 403
+    assert (await web.post("/api/v1/invitations", json=body)).status_code == 201

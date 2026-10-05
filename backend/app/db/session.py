@@ -3,7 +3,19 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, AsyncSession
+
+
+async def use_tenant(conn: AsyncConnection, org_id: uuid.UUID) -> None:
+    """Point an open transaction at a tenant that is only known (or created) inside it."""
+    await conn.execute(
+        text("select set_config('app.organization_id', :o, true)"), {"o": str(org_id)}
+    )
+
+
+async def lookup_as(conn: AsyncConnection, key: str, value: str) -> None:
+    """Name the one row a pre-tenant lookup policy may show (transaction-local), e.g. `app.invite_hash`."""
+    await conn.execute(text("select set_config(:k, :v, true)"), {"k": key, "v": value})
 
 
 @asynccontextmanager
