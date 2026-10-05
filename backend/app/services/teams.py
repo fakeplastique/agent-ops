@@ -54,7 +54,9 @@ async def create_team(
     s: AsyncSession, org: uuid.UUID, actor: uuid.UUID, name: str, parent: uuid.UUID | None
 ) -> dict:
     check_text("name", name, 1, 80)
-    if parent is not None:  # a delete of the parent waits, or this create sees it gone (404, not FK 500)
+    if (
+        parent is not None
+    ):  # a delete of the parent waits, or this create sees it gone (404, not FK 500)
         await s.execute(_TREE_LOCK, {"k": f"teams:{org}"})
     await _parent_exists(s, org, parent)
     try:

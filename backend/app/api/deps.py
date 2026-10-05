@@ -108,6 +108,11 @@ async def get_actor(
     Cookie-authenticated writes also need the web app's Origin; a bearer token carries no ambient cookie."""
     if authorization is not None:
         return await get_current_principal(request, engine, redis, clock, authorization)
+    return await session_user(request, engine, clock)
+
+
+async def session_user(request: Request, engine: EngineDep, clock: ClockDep) -> UserPrincipal:
+    """The web session's user in its selected organization (role read now); writes need the web Origin."""
     session = await web_session(request, engine, clock)
     await require_same_origin(request)
     org = session.selected_organization_id
@@ -118,6 +123,8 @@ async def get_actor(
 
 
 ActorDep = Annotated[Principal, Depends(get_actor)]
+# A person at the browser: no bearer token qualifies (minting credentials must not chain from a credential).
+SessionUserDep = Annotated[UserPrincipal, Depends(session_user)]
 
 
 def require_org_admin(actor: ActorDep) -> UserPrincipal:

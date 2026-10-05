@@ -5,9 +5,10 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Request, Response
 from pydantic import BaseModel, Field
 
-from app.api.deps import ActorDep, EngineDep, write_limit
+from app.api.deps import ActorDep, EngineDep, SessionUserDep, user_write_limit, write_limit
 from app.api.pagination import Page, PaginationParams, paginate
 from app.api.schemas.base import BaseSchema
+from app.authz.origin import require_same_origin
 from app.authz.principals import UserPrincipal
 from app.db.session import tenant_session
 from app.domain.errors import Forbidden
@@ -40,9 +41,16 @@ class PatCreated(PatOut):
     token: str  # shown once
 
 
-@router.post("", status_code=201, response_model=PatCreated, dependencies=[Depends(write_limit)])
-async def create(body: PatIn, response: Response, user: UserDep, engine: EngineDep) -> PatCreated:
-    """A token for this user in the current organization; the raw value is only in this reply."""
+@router.post(
+    "",
+    status_code=201,
+    response_model=PatCreated,
+    dependencies=[Depends(require_same_origin), Depends(user_write_limit)],
+)
+async def create(
+    body: PatIn, response: Response, user: SessionUserDep, engine: EngineDep
+) -> PatCreated:
+    """Web session only, so a leaked token cannot mint its own successors. The raw value is only in this reply."""
     async with tenant_session(engine, user.organization_id) as s:
         pat_id, raw = await tokens.create_pat(s, user.organization_id, user.user_id, body.name)
         row = await tokens.get_pat(s, user.organization_id, user.user_id, pat_id)
