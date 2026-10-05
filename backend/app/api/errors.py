@@ -1,4 +1,3 @@
-import json
 import logging
 import uuid
 from typing import Any
@@ -38,6 +37,21 @@ DOMAIN_STATUS_CODES: dict[type[DomainError], int] = {
 }
 
 
+_HTTP_CODES = {
+    400: "bad_request",
+    401: "unauthorized",
+    402: "plan_limit_reached",
+    403: "forbidden",
+    404: "not_found",
+    405: "method_not_allowed",
+    409: "conflict",
+    413: "payload_too_large",
+    415: "unsupported_media_type",
+    422: "invalid_input",
+    429: "rate_limited",
+}
+
+
 def error_envelope(code: str, message: str, details: Any = None) -> dict[str, Any]:
     safe_details = jsonable_encoder(details) if details is not None else {}
     return {
@@ -67,39 +81,6 @@ def register_error_handlers(app: FastAPI) -> None:
             content=error_envelope(code=code, message=message, details=details),
         )
 
-    @app.exception_handler(UnicodeDecodeError)
-    async def unicode_error_handler(_: Request, exc: UnicodeDecodeError) -> JSONResponse:
-        return JSONResponse(
-            status_code=400,
-            content=error_envelope(
-                code="invalid_input",
-                message="Request body contains invalid UTF-8 encoding",
-                details={"encoding": exc.encoding},
-            ),
-        )
-
-    @app.exception_handler(RecursionError)
-    async def recursion_error_handler(_: Request, exc: RecursionError) -> JSONResponse:
-        return JSONResponse(
-            status_code=422,
-            content=error_envelope(
-                code="invalid_input",
-                message="Request payload exceeds maximum nesting depth",
-                details={},
-            ),
-        )
-
-    @app.exception_handler(json.JSONDecodeError)
-    async def json_decode_error_handler(_: Request, exc: json.JSONDecodeError) -> JSONResponse:
-        return JSONResponse(
-            status_code=422,
-            content=error_envelope(
-                code="invalid_input",
-                message=f"Invalid JSON at line {exc.lineno} column {exc.colno}",
-                details={"msg": exc.msg, "lineno": exc.lineno, "colno": exc.colno},
-            ),
-        )
-
     @app.exception_handler(RequestValidationError)
     async def validation_error_handler(_: Request, exc: RequestValidationError) -> JSONResponse:
         return JSONResponse(
@@ -113,20 +94,7 @@ def register_error_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(StarletteHTTPException)
     async def http_exception_handler(_: Request, exc: StarletteHTTPException) -> JSONResponse:
-        code_map = {
-            400: "bad_request",
-            401: "unauthorized",
-            402: "plan_limit_reached",
-            403: "forbidden",
-            404: "not_found",
-            405: "method_not_allowed",
-            409: "conflict",
-            413: "payload_too_large",
-            415: "unsupported_media_type",
-            422: "invalid_input",
-            429: "rate_limited",
-        }
-        code = code_map.get(exc.status_code, f"http_{exc.status_code}")
+        code = _HTTP_CODES.get(exc.status_code, f"http_{exc.status_code}")
         message = str(exc.detail) if exc.detail else "HTTP error"
         return JSONResponse(
             status_code=exc.status_code,

@@ -63,8 +63,17 @@ def test_unknown_field_422_and_deeply_nested_json_clean_4xx():
         content=deep_json.encode("utf-8"),
         headers={"Content-Type": "application/json"},
     )
-    assert 400 <= res_deep.status_code < 500, f"Got {res_deep.status_code} for deep json"
-    assert res_deep.json()["error"]["code"] in ("invalid_input", "bad_request")
+    assert res_deep.status_code == 422
+    assert res_deep.json()["error"]["code"] == "invalid_input"
+
+    # Nesting deep enough to hit the parser's recursion limit
+    res_rec = client.post(
+        "/test-limits/echo",
+        content=b"[" * 100_000 + b"]" * 100_000,
+        headers={"Content-Type": "application/json"},
+    )
+    assert res_rec.status_code == 400
+    assert res_rec.json()["error"]["code"] == "bad_request"
 
 
 def test_invalid_utf8_and_wrong_content_type_clean_4xx():
@@ -74,8 +83,8 @@ def test_invalid_utf8_and_wrong_content_type_clean_4xx():
         content=b"\xff\xfe\xfd",
         headers={"Content-Type": "application/json"},
     )
-    assert 400 <= res.status_code < 500, f"Got {res.status_code} for invalid utf8"
-    assert "error" in res.json()
+    assert res.status_code == 400
+    assert res.json()["error"]["code"] == "bad_request"
 
     # Wrong content-type
     res_type = client.post(
@@ -83,5 +92,26 @@ def test_invalid_utf8_and_wrong_content_type_clean_4xx():
         content="plain text",
         headers={"Content-Type": "text/plain"},
     )
-    assert 400 <= res_type.status_code < 500, f"Got {res_type.status_code} for wrong content type"
-    assert "error" in res_type.json()
+    assert res_type.status_code == 422
+    assert res_type.json()["error"]["code"] == "invalid_input"
+
+
+def test_production_stack_413_and_request_id_validation():
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    prod = TestClient(app, raise_server_exceptions=False)
+    res = prod.post("/api/v1/auth/organization", content=b"x" * (2 * 1024 * 1024))
+    assert res.status_code == 413
+    assert res.json()["error"]["code"] == "payload_too_large"
+    assert "x-request-id" in res.headers
+    # catches: a client-chosen id of any length echoed into headers, bodies and logs
+    assert (
+        prod.get("/healthz", headers={"X-Request-ID": "a" * 500}).headers["x-request-id"]
+        != "a" * 500
+    )
+    assert (
+        prod.get("/healthz", headers={"X-Request-ID": "req-123"}).headers["x-request-id"]
+        == "req-123"
+    )

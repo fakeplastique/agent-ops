@@ -1,3 +1,4 @@
+import re
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -24,13 +25,16 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     yield
 
 
+_REQUEST_ID = re.compile(r"[\w-]{1,64}")  # a client-sent id is echoed into logs: bound it
+
 app = FastAPI(title="Agent Ops", lifespan=lifespan)
 app.add_middleware(BodyLimitMiddleware)
 
 
 @app.middleware("http")
 async def request_id_middleware(request: Request, call_next) -> Response:
-    req_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+    given = request.headers.get("X-Request-ID", "")
+    req_id = given if _REQUEST_ID.fullmatch(given) else str(uuid.uuid4())
     request.state.request_id = req_id
     response = await call_next(request)
     response.headers["X-Request-ID"] = req_id
