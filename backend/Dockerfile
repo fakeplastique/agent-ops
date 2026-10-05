@@ -10,4 +10,4 @@ COPY scripts/migrate.sh scripts/db_roles.sql ./scripts/
 RUN useradd --uid 10001 --no-create-home app
 USER 10001
 ENV PATH="/srv/.venv/bin:$PATH" MIGRATE_PYTHON=python BACKEND_DIR=/srv
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --proxy-headers --forwarded-allow-ips=*"]
