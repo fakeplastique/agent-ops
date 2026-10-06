@@ -33,6 +33,10 @@ _REVOKE_PAT = text(
     "update personal_access_tokens set revoked_at = now() where organization_id = :o and id = :t"
     " and user_id = coalesce(cast(:u as uuid), user_id) and revoked_at is null returning id"
 )
+_ALREADY_REVOKED = text(
+    "select 1 from personal_access_tokens where organization_id = :o and id = :t"
+    " and user_id = coalesce(cast(:u as uuid), user_id) and revoked_at is not null"
+)
 _PAT_COLS = "id, name, created_at, revoked_at"  # never token_hash or token_prefix
 _LIST_PATS = text(
     f"select {_PAT_COLS}, count(*) over () as total from personal_access_tokens"
@@ -110,8 +114,11 @@ async def revoke_pat(
     user_id: uuid.UUID | None = None,
 ) -> None:  # fmt: skip
     o = organization_id
-    row = (await session.execute(_REVOKE_PAT, {"o": o, "t": pat_id, "u": user_id})).first()
-    if row is None:
+    params = {"o": o, "t": pat_id, "u": user_id}
+    if (await session.execute(_REVOKE_PAT, params)).first() is None:
+        # idempotent for the owner: a retried revoke is done, not "not found"; others still get 404
+        if (await session.execute(_ALREADY_REVOKED, params)).first() is not None:
+            return
         raise NotFoundError
     await audit.record(
         session, o, "personal_access_token", pat_id, "revoked",

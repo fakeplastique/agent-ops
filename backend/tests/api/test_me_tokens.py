@@ -42,6 +42,14 @@ async def test_pat_shown_once_listed_without_secrets_and_revoked(web, app_engine
     ).status_code == 204
     assert (await web.client.get("/api/v1/me", headers=new)).status_code == 401  # very next request
     assert (await web.client.get(f"{MT}/{pat}")).json()["revoked_at"] is not None
+    revoked_at = (await web.client.get(f"{MT}/{pat}")).json()["revoked_at"]
+    again = await web.client.request(
+        "DELETE", f"{MT}/{pat}", headers={"Origin": "https://app.test"}
+    )
+    assert again.status_code == 204  # catches: a retried revoke reported as "not found"
+    assert (await web.client.get(f"{MT}/{pat}")).json()[
+        "revoked_at"
+    ] == revoked_at  # first stamp kept
 
 
 async def test_a_token_cannot_mint_tokens(web, app_engine, owner_engine):
