@@ -1,42 +1,1192 @@
 {
   "info": {
     "name": "Agent Ops API",
+    "description": "Run by scripts/gate.sh against a live API; credentials come from backend/postman/seed.py.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
-  "variable": [{ "key": "baseUrl", "value": "http://localhost:8000" }],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8000"
+    }
+  ],
   "item": [
     {
-      "name": "healthz",
-      "request": { "method": "GET", "url": "{{baseUrl}}/healthz" },
-      "event": [
+      "name": "health",
+      "item": [
         {
-          "listen": "test",
-          "script": {
-            "exec": [
-              "pm.test('200 and ok', () => {",
-              "  pm.response.to.have.status(200);",
-              "  pm.expect(pm.response.json().status).to.eql('ok');",
-              "});"
-            ]
-          }
+          "name": "healthz",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/healthz"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('200 and ok', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(pm.response.json().status).to.eql('ok');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "readyz",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/readyz"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('200 with both dependencies up', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(pm.response.json().checks).to.eql({ postgres: true, redis: true });",
+                  "});"
+                ]
+              }
+            }
+          ]
         }
       ]
     },
     {
-      "name": "readyz",
-      "request": { "method": "GET", "url": "{{baseUrl}}/readyz" },
-      "event": [
+      "name": "errors",
+      "item": [
         {
-          "listen": "test",
-          "script": {
-            "exec": [
-              "pm.test('200 with both dependencies up', () => {",
-              "  pm.response.to.have.status(200);",
-              "  const b = pm.response.json();",
-              "  pm.expect(b.checks).to.eql({ postgres: true, redis: true });",
-              "});"
-            ]
-          }
+          "name": "401 without a credential",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/decision-requests"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('401 unauthenticated in the error envelope', () => {",
+                  "  pm.response.to.have.status(401);",
+                  "  const e = pm.response.json().error;",
+                  "  pm.expect(e).to.have.all.keys('code', 'message', 'details');",
+                  "  pm.expect(e.code).to.eql('unauthenticated');",
+                  "  pm.expect(e.message).to.be.a('string');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "404 unknown request",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{requesterToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/decision-requests/00000000-0000-4000-8000-000000000000"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('404 not_found in the error envelope', () => {",
+                  "  pm.response.to.have.status(404);",
+                  "  const e = pm.response.json().error;",
+                  "  pm.expect(e).to.have.all.keys('code', 'message', 'details');",
+                  "  pm.expect(e.code).to.eql('not_found');",
+                  "  pm.expect(e.message).to.be.a('string');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "422 missing title",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{requesterToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/decision-requests",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"description\": \"newman\",\n  \"action_type\": \"refund\",\n  \"payload\": {\n    \"amount\": 5\n  },\n  \"risk_level\": \"low\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('422 invalid_input in the error envelope', () => {",
+                  "  pm.response.to.have.status(422);",
+                  "  const e = pm.response.json().error;",
+                  "  pm.expect(e).to.have.all.keys('code', 'message', 'details');",
+                  "  pm.expect(e.code).to.eql('invalid_input');",
+                  "  pm.expect(e.message).to.be.a('string');",
+                  "});",
+                  "",
+                  "pm.test('details lists the field', () => {",
+                  "  pm.expect(JSON.stringify(pm.response.json().error.details)).to.include('title');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "lifecycle",
+      "item": [
+        {
+          "name": "create",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{requesterToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/decision-requests",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"{{run}} lifecycle\",\n  \"description\": \"newman\",\n  \"action_type\": \"refund\",\n  \"payload\": {\n    \"amount\": 5\n  },\n  \"risk_level\": \"low\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('201 pending_votes with Location', () => {",
+                  "  pm.response.to.have.status(201);",
+                  "  const b = pm.response.json();",
+                  "  pm.expect(b.status).to.eql('pending_votes');",
+                  "  pm.expect(b.version).to.eql(1);",
+                  "  pm.expect(pm.response.headers.get('Location')).to.eql('/api/v1/decision-requests/' + b.id);",
+                  "  pm.environment.set('lifecycleId', b.id);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "voter 1 approves",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{voter1Token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/decision-requests/{{lifecycleId}}/votes",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_version\": 1,\n  \"verdict\": \"approve\",\n  \"confidence\": 0.9,\n  \"rationale\": \"fine\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('201, request now pending_votes', () => {",
+                  "  pm.response.to.have.status(201);",
+                  "  pm.expect(pm.response.json().status).to.eql('pending_votes');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "409 voter 1 votes twice",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{voter1Token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/decision-requests/{{lifecycleId}}/votes",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_version\": 1,\n  \"verdict\": \"approve\",\n  \"confidence\": 0.9,\n  \"rationale\": \"fine\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('409 already_voted in the error envelope', () => {",
+                  "  pm.response.to.have.status(409);",
+                  "  const e = pm.response.json().error;",
+                  "  pm.expect(e).to.have.all.keys('code', 'message', 'details');",
+                  "  pm.expect(e.code).to.eql('already_voted');",
+                  "  pm.expect(e.message).to.be.a('string');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "voter 2 approves",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{voter2Token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/decision-requests/{{lifecycleId}}/votes",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_version\": 1,\n  \"verdict\": \"approve\",\n  \"confidence\": 0.9,\n  \"rationale\": \"fine\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('201, request now pending_votes', () => {",
+                  "  pm.response.to.have.status(201);",
+                  "  pm.expect(pm.response.json().status).to.eql('pending_votes');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "voter 3 approves",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{voter3Token}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/decision-requests/{{lifecycleId}}/votes",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_version\": 1,\n  \"verdict\": \"approve\",\n  \"confidence\": 0.9,\n  \"rationale\": \"fine\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('201, request now pending_approval', () => {",
+                  "  pm.response.to.have.status(201);",
+                  "  pm.expect(pm.response.json().status).to.eql('pending_approval');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "escalated to a human",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/decision-requests/{{lifecycleId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('pending_approval at the floor risk', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  const b = pm.response.json();",
+                  "  pm.expect(b.status).to.eql('pending_approval');",
+                  "  pm.expect(b.effective_risk_level).to.eql('medium');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "404 no receipt before approval",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/decision-requests/{{lifecycleId}}/receipt"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('404 not_found in the error envelope', () => {",
+                  "  pm.response.to.have.status(404);",
+                  "  const e = pm.response.json().error;",
+                  "  pm.expect(e).to.have.all.keys('code', 'message', 'details');",
+                  "  pm.expect(e.code).to.eql('not_found');",
+                  "  pm.expect(e.message).to.be.a('string');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "approver inbox",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/me/pending-approvals"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('the escalated request waits for the org_admin', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  const step = pm.response.json().items.find(s => s.decision_request_id === pm.environment.get('lifecycleId'));",
+                  "  pm.expect(step, 'step in inbox').to.be.an('object');",
+                  "  pm.expect(step.required_role).to.eql('org_admin');",
+                  "  pm.environment.set('stepId', step.id);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "403 an agent cannot decide",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{requesterToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/approval-steps/{{stepId}}/decide",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_version\": 1,\n  \"decision\": \"approve\",\n  \"comment\": \"ok\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('403 forbidden in the error envelope', () => {",
+                  "  pm.response.to.have.status(403);",
+                  "  const e = pm.response.json().error;",
+                  "  pm.expect(e).to.have.all.keys('code', 'message', 'details');",
+                  "  pm.expect(e.code).to.eql('forbidden');",
+                  "  pm.expect(e.message).to.be.a('string');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "approve",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{run}}-decide"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/approval-steps/{{stepId}}/decide",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_version\": 1,\n  \"decision\": \"approve\",\n  \"comment\": \"ok\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('200, request approved', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  const b = pm.response.json();",
+                  "  pm.expect(b.status).to.eql('approved');",
+                  "  pm.expect(b.request_status).to.eql('approved');",
+                  "  pm.environment.set('decided', pm.response.text());",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "approve replayed",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{run}}-decide"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/approval-steps/{{stepId}}/decide",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"request_version\": 1,\n  \"decision\": \"approve\",\n  \"comment\": \"ok\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('same key, same body: the first answer again', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(pm.response.json()).to.eql(JSON.parse(pm.environment.get('decided')));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "receipt",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/decision-requests/{{lifecycleId}}/receipt"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('200 signed receipt for this request', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  const b = pm.response.json();",
+                  "  pm.expect(b).to.have.all.keys('alg', 'kid', 'payload', 'signature');",
+                  "  pm.expect(JSON.stringify(b.payload)).to.include(pm.environment.get('lifecycleId'));",
+                  "  pm.environment.set('receipt', pm.response.text());",
+                  "  const s = b.signature;",
+                  "  const forged = Object.assign({}, b, { signature: (s[0] === 'A' ? 'B' : 'A') + s.slice(1) });",
+                  "  pm.environment.set('forged', JSON.stringify(forged));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "verify receipt",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/receipts/verify",
+            "body": {
+              "mode": "raw",
+              "raw": "{{receipt}}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('no credential needed; valid is true', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(pm.response.json()).to.eql({ valid: true });",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "verify forged receipt",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/receipts/verify",
+            "body": {
+              "mode": "raw",
+              "raw": "{{forged}}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('no credential needed; valid is false', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(pm.response.json()).to.eql({ valid: false });",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "idempotency",
+      "item": [
+        {
+          "name": "create with a key",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{requesterToken}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{run}}-create"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/decision-requests",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"{{run}} idem\",\n  \"description\": \"newman\",\n  \"action_type\": \"refund\",\n  \"payload\": {\n    \"amount\": 5\n  },\n  \"risk_level\": \"low\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('201', () => {",
+                  "  pm.response.to.have.status(201);",
+                  "  pm.environment.set('idemBody', pm.response.text());",
+                  "  pm.environment.set('idemLocation', pm.response.headers.get('Location'));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "same key, same body",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{requesterToken}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{run}}-create"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/decision-requests",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"{{run}} idem\",\n  \"description\": \"newman\",\n  \"action_type\": \"refund\",\n  \"payload\": {\n    \"amount\": 5\n  },\n  \"risk_level\": \"low\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('201 with the first answer and its Location', () => {",
+                  "  pm.response.to.have.status(201);",
+                  "  pm.expect(pm.response.json()).to.eql(JSON.parse(pm.environment.get('idemBody')));",
+                  "  pm.expect(pm.response.headers.get('Location')).to.eql(pm.environment.get('idemLocation'));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "one request exists",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{requesterToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/decision-requests?q={{run}} idem"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('exactly one', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(pm.response.json().total).to.eql(1);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "same key, other body",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{requesterToken}}"
+              },
+              {
+                "key": "Idempotency-Key",
+                "value": "{{run}}-create"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/decision-requests",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"{{run}} idem changed\",\n  \"description\": \"newman\",\n  \"action_type\": \"refund\",\n  \"payload\": {\n    \"amount\": 5\n  },\n  \"risk_level\": \"low\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('422 idempotency_key_reuse in the error envelope', () => {",
+                  "  pm.response.to.have.status(422);",
+                  "  const e = pm.response.json().error;",
+                  "  pm.expect(e).to.have.all.keys('code', 'message', 'details');",
+                  "  pm.expect(e.code).to.eql('idempotency_key_reuse');",
+                  "  pm.expect(e.message).to.be.a('string');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "pagination",
+      "item": [
+        {
+          "name": "create page item",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{requesterToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/decision-requests",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"{{run}} page\",\n  \"description\": \"newman\",\n  \"action_type\": \"note\",\n  \"payload\": {\n    \"amount\": 5\n  },\n  \"risk_level\": \"low\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('201', () => pm.response.to.have.status(201));",
+                  "const n = Number(pm.environment.get('pageMade') || 0) + 1;",
+                  "pm.environment.set('pageMade', n);",
+                  "if (n < 5) postman.setNextRequest('create page item');"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "first page",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{requesterToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/decision-requests?q={{run}} page&limit=2"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const b = pm.response.json();",
+                  "pm.test('200 page of at most 2', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(b.limit).to.eql(2);",
+                  "  pm.expect(b.items.length).to.be.at.most(2);",
+                  "});",
+                  "const seen = JSON.parse(pm.environment.get('pageSeen') || '[]').concat(b.items.map(i => i.id));",
+                  "pm.environment.set('pageSeen', JSON.stringify(seen));",
+                  "const pages = Number(pm.environment.get('pages') || 0) + 1;",
+                  "pm.environment.set('pages', pages);",
+                  "if (b.nextLink) {",
+                  "  pm.environment.set('nextLink', b.nextLink);",
+                  "  if (pm.info.requestName === 'next page') postman.setNextRequest('next page');",
+                  "} else {",
+                  "  pm.test('nextLink walked every item exactly once', () => {",
+                  "    pm.expect(b.total).to.eql(5);",
+                  "    pm.expect(pages).to.eql(3);",
+                  "    pm.expect(seen.length).to.eql(5);",
+                  "    pm.expect(new Set(seen).size).to.eql(5);",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "next page",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{requesterToken}}"
+              }
+            ],
+            "url": "{{nextLink}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const b = pm.response.json();",
+                  "pm.test('200 page of at most 2', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(b.limit).to.eql(2);",
+                  "  pm.expect(b.items.length).to.be.at.most(2);",
+                  "});",
+                  "const seen = JSON.parse(pm.environment.get('pageSeen') || '[]').concat(b.items.map(i => i.id));",
+                  "pm.environment.set('pageSeen', JSON.stringify(seen));",
+                  "const pages = Number(pm.environment.get('pages') || 0) + 1;",
+                  "pm.environment.set('pages', pages);",
+                  "if (b.nextLink) {",
+                  "  pm.environment.set('nextLink', b.nextLink);",
+                  "  if (pm.info.requestName === 'next page') postman.setNextRequest('next page');",
+                  "} else {",
+                  "  pm.test('nextLink walked every item exactly once', () => {",
+                  "    pm.expect(b.total).to.eql(5);",
+                  "    pm.expect(pages).to.eql(3);",
+                  "    pm.expect(seen.length).to.eql(5);",
+                  "    pm.expect(new Set(seen).size).to.eql(5);",
+                  "  });",
+                  "}"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "filters",
+      "item": [
+        {
+          "name": "status approved",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/decision-requests?q={{run}}&status=approved&limit=100"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const b = pm.response.json();",
+                  "pm.test('status approved', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(b.items.map(i => i.id)).to.eql([pm.environment.get('lifecycleId')]);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "status pending_votes",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/decision-requests?q={{run}}&status=pending_votes&limit=100"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const b = pm.response.json();",
+                  "pm.test('status pending_votes', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(b.total).to.eql(6);",
+                  "  b.items.forEach(i => pm.expect(i.status).to.eql('pending_votes'));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "risk_level medium",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/decision-requests?q={{run}}&risk_level=medium&limit=100"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const b = pm.response.json();",
+                  "pm.test('risk_level medium', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(b.total).to.eql(2);",
+                  "  b.items.forEach(i => pm.expect(i.effective_risk_level).to.eql('medium'));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "agent_id requester",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/decision-requests?q={{run}}&agent_id={{requesterId}}&limit=100"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const b = pm.response.json();",
+                  "pm.test('agent_id requester', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(b.total).to.eql(7);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "agent_id voter",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/decision-requests?agent_id={{voterId}}&limit=100"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const b = pm.response.json();",
+                  "pm.test('agent_id voter', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(b.total).to.eql(0);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "q title substring",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/decision-requests?q={{run}} LIFECYCLE&limit=100"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const b = pm.response.json();",
+                  "pm.test('q title substring', () => {",
+                  "  pm.response.to.have.status(200);",
+                  "  pm.expect(b.items.map(i => i.id)).to.eql([pm.environment.get('lifecycleId')]);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "plan gating",
+      "item": [
+        {
+          "name": "402 Free org over its monthly requests",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{fullOrgToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/decision-requests",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"title\": \"{{run}} over\",\n  \"description\": \"newman\",\n  \"action_type\": \"refund\",\n  \"payload\": {\n    \"amount\": 5\n  },\n  \"risk_level\": \"low\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('402 plan_limit_reached in the error envelope', () => {",
+                  "  pm.response.to.have.status(402);",
+                  "  const e = pm.response.json().error;",
+                  "  pm.expect(e).to.have.all.keys('code', 'message', 'details');",
+                  "  pm.expect(e.code).to.eql('plan_limit_reached');",
+                  "  pm.expect(e.message).to.be.a('string');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "create team",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/teams",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"{{run}} team\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('201', () => {",
+                  "  pm.response.to.have.status(201);",
+                  "  pm.environment.set('teamId', pm.response.json().id);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "402 team policy needs a higher plan",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{adminToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/escalation-policies",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"team_id\": \"{{teamId}}\",\n  \"levels\": [\n    {\n      \"role\": \"org_admin\",\n      \"timeout_minutes\": 60\n    }\n  ]\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('402 plan_feature_required in the error envelope', () => {",
+                  "  pm.response.to.have.status(402);",
+                  "  const e = pm.response.json().error;",
+                  "  pm.expect(e).to.have.all.keys('code', 'message', 'details');",
+                  "  pm.expect(e.code).to.eql('plan_feature_required');",
+                  "  pm.expect(e.message).to.be.a('string');",
+                  "});"
+                ]
+              }
+            }
+          ]
         }
       ]
     }

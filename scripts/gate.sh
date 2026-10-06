@@ -53,7 +53,14 @@ else
 fi
 step "api up" curl -sf -o /dev/null --retry 30 --retry-delay 1 --retry-all-errors localhost:8000/healthz
 
-step "api collection" npx --yes newman run backend/postman/collection.json
+# Fresh tenants every run; their tokens reach newman as --env-var flags.
+collection() {
+  local vars
+  vars=$(uv run --project backend python backend/postman/seed.py) || return 1
+  # shellcheck disable=SC2086 # one word per flag
+  npx --yes newman run backend/postman/collection.json $vars
+}
+step "api collection" collection
 step "frontend e2e" pnpm --dir frontend exec playwright test
 
 if ((${#failed[@]})); then
