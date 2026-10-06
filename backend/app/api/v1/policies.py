@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, Request, Response
 from pydantic import BaseModel, Field, StringConstraints
 
 from app.api.deps import ActorDep, AdminDep, EngineDep, write_limit
+from app.api.errors import error_responses
 from app.api.pagination import Page, PaginationParams, paginate
 from app.api.schemas.base import BaseSchema
 from app.db.session import tenant_session
@@ -68,7 +69,13 @@ class PolicyOut(BaseModel):
     updated_at: datetime
 
 
-@router.post("", status_code=201, response_model=PolicyOut, dependencies=[Depends(write_limit)])
+@router.post(
+    "",
+    status_code=201,
+    response_model=PolicyOut,
+    dependencies=[Depends(write_limit)],
+    responses=error_responses(402, 409),
+)
 async def create(
     body: PolicyIn, response: Response, admin: AdminDep, engine: EngineDep
 ) -> PolicyOut:

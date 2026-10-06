@@ -3,9 +3,13 @@ import uuid
 from typing import Any
 
 from fastapi import FastAPI, Request
+from fastapi.dependencies.models import Dependant
+from fastapi.dependencies.utils import get_flat_params
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from fastapi.routing import APIRoute
+from pydantic import BaseModel
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.domain import errors as de
@@ -62,6 +66,69 @@ _HTTP_CODES = {
     422: "invalid_input",
     429: "rate_limited",
 }
+
+
+class ErrorDetail(BaseModel):
+    code: str
+    message: str
+    details: Any
+
+
+class ErrorBody(BaseModel):
+    error: ErrorDetail
+
+
+_DOC = {
+    400: "Bad request",
+    401: "Missing, invalid or revoked credential",
+    402: "The organization's plan does not allow this",
+    403: "Role, principal kind or origin not allowed",
+    404: "Not found (also another organization's id)",
+    409: "Conflicts with the current state or version",
+    422: "Invalid input",
+    429: "Rate limited; see Retry-After",
+}
+
+
+def error_responses(*codes: int) -> dict[int | str, dict[str, Any]]:
+    """`responses=` for a route: each code documented with the error envelope."""
+    return {c: {"model": ErrorBody, "description": _DOC[c]} for c in codes}
+
+
+_AUTH = {"get_actor", "get_current_principal", "web_session"}
+_ROLE = {"get_actor", "session_user", "require_same_origin", "require_org_admin", "require_user"}
+# Bearer resolution throttles failed attempts per IP, so any bearer route can answer 429 too.
+_LIMIT = {"get_actor", "get_current_principal", "write_limit", "user_write_limit", "public_limit"}
+
+
+def _calls(dependant: Dependant) -> set[str]:
+    out = set()
+    for d in dependant.dependencies:
+        out.add(getattr(d.call, "__name__", ""))
+        out |= _calls(d)
+    return out
+
+
+def _routes(router: Any):
+    for r in router.routes:
+        if isinstance(r, APIRoute):
+            yield r
+        elif hasattr(r, "original_router"):  # FastAPI wraps an included router
+            yield from _routes(r.original_router)
+
+
+def document_errors(app: FastAPI) -> None:
+    """Add the 401/403/404/422/429 a route's dependencies can raise; 400/402/409 the route declares itself."""
+    for r in _routes(app):
+        calls = _calls(r.dependant)
+        codes = [
+            *([401] if calls & _AUTH else []),
+            *([403] if calls & _ROLE else []),
+            *([404] if r.param_convertors else []),
+            *([422] if get_flat_params(r.dependant) or r.body_field else []),  # FastAPI's own rule
+            *([429] if calls & _LIMIT else []),
+        ]
+        r.responses = error_responses(*codes) | r.responses
 
 
 def error_envelope(code: str, message: str, details: Any = None) -> dict[str, Any]:

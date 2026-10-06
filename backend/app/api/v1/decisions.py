@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api import idempotency
 from app.api.deps import ActorDep, ClockDep, EngineDep, write_limit
+from app.api.errors import error_responses
 from app.api.pagination import Page, PaginationParams, paginate
 from app.api.schemas.decisions import DecisionIn, DecisionOut, ReviseIn, RiskIn, Sort
 from app.authz.principals import AgentPrincipal, Principal
@@ -59,7 +60,13 @@ def _created(body: Any, status: int = 201) -> JSONResponse:
     return JSONResponse(body, status_code=status, headers=headers)
 
 
-@router.post("", status_code=201, response_model=DecisionOut, dependencies=[Depends(write_limit)])
+@router.post(
+    "",
+    status_code=201,
+    response_model=DecisionOut,
+    dependencies=[Depends(write_limit)],
+    responses=error_responses(402, 409),
+)
 async def create(
     body: DecisionIn,
     actor: ActorDep,
@@ -120,6 +127,7 @@ async def get_decision(
     "/{decision_request_id}/revise",
     response_model=DecisionOut,
     dependencies=[Depends(write_limit)],
+    responses=error_responses(409),
 )
 async def revise(
     decision_request_id: uuid.UUID,
@@ -142,6 +150,7 @@ async def revise(
     "/{decision_request_id}/withdraw",
     response_model=DecisionOut,
     dependencies=[Depends(write_limit)],
+    responses=error_responses(409),
 )
 async def withdraw(
     decision_request_id: uuid.UUID, actor: ActorDep, engine: EngineDep, clock: ClockDep

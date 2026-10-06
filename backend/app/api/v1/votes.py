@@ -4,6 +4,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Request, Response
 
 from app.api.deps import ActorDep, ClockDep, EngineDep, write_limit
+from app.api.errors import error_responses
 from app.api.pagination import PaginationParams, paginate
 from app.api.schemas.decisions import VoteCast, VoteIn, VoteOut, VotesPage
 from app.api.v1.decisions import PATH, require_agent, session_of, viewer_session
@@ -15,7 +16,13 @@ from app.services import decisions, votes
 router = APIRouter(prefix="/decision-requests/{decision_request_id}/votes", tags=["votes"])
 
 
-@router.post("", status_code=201, response_model=VoteCast, dependencies=[Depends(write_limit)])
+@router.post(
+    "",
+    status_code=201,
+    response_model=VoteCast,
+    dependencies=[Depends(write_limit)],
+    responses=error_responses(409),
+)
 async def cast(
     decision_request_id: uuid.UUID,
     body: VoteIn,

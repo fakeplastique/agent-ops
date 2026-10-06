@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import text
 
 from app.api.deps import COOKIE, ActorDep, ClockDep, EngineDep, SessionDep, user_write_limit
+from app.api.errors import error_responses
 from app.api.schemas.base import BaseSchema
 from app.authz.origin import require_same_origin
 from app.db.session import tenant_session
@@ -39,6 +40,7 @@ async def _read(engine: EngineDep, org: uuid.UUID) -> OrganizationOut:
     status_code=201,
     response_model=OrganizationOut,
     dependencies=[Depends(require_same_origin), Depends(user_write_limit)],
+    responses=error_responses(409),
 )
 async def create_organization(
     body: OrganizationIn,

@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, Request, Response
 from pydantic import BaseModel, Field
 
 from app.api.deps import ActorDep, AdminDep, EngineDep, write_limit
+from app.api.errors import error_responses
 from app.api.pagination import Page, PaginationParams, paginate
 from app.api.schemas.base import BaseSchema
 from app.db.session import tenant_session
@@ -40,7 +41,13 @@ class AgentCreated(AgentOut):
     token: str  # shown once
 
 
-@router.post("", status_code=201, response_model=AgentCreated, dependencies=[Depends(write_limit)])
+@router.post(
+    "",
+    status_code=201,
+    response_model=AgentCreated,
+    dependencies=[Depends(write_limit)],
+    responses=error_responses(409),
+)
 async def create(
     body: AgentIn, response: Response, admin: AdminDep, engine: EngineDep
 ) -> AgentCreated:

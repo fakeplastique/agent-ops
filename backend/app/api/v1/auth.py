@@ -7,6 +7,7 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.api.deps import COOKIE, ClockDep, EngineDep, OidcDep, RedisDep, SessionDep
+from app.api.errors import error_responses
 from app.authz.origin import require_same_origin
 from app.config import settings
 from app.services import oidc, web_sessions
@@ -54,7 +55,7 @@ async def login(cfg: OidcDep, redis: RedisDep) -> RedirectResponse:
     return response
 
 
-@router.get("/callback")
+@router.get("/callback", responses=error_responses(400))
 async def callback(
     request: Request,
     cfg: OidcDep,
