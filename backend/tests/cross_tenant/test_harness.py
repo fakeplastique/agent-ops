@@ -32,3 +32,17 @@ def test_the_route_walk_sees_the_apps_routes():
         "/api/v1/auth/organization",
     } <= paths
     assert len(paths) >= 7
+
+
+def test_a_new_method_on_a_listed_path_is_unregistered():
+    probe = FastAPI()
+    path = "/api/v1/organizations/{organization_id}"
+
+    @probe.get(path)
+    def _read(organization_id: str): ...
+
+    @probe.delete(path)
+    def _drop(organization_id: str): ...
+
+    # catches: DELETE slipping past the table because GET on the same path is listed
+    assert unregistered(probe) == [("DELETE", path)]

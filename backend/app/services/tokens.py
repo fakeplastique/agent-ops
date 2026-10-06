@@ -28,9 +28,22 @@ _CREATE_PAT = text(
     "insert into personal_access_tokens (organization_id, user_id, name, token_prefix, token_hash)"
     " values (:o, :u, :n, :p, :h) returning id"
 )
+# A user-scoped revoke names its owner: another user's token id is "not found", even for an org_admin.
 _REVOKE_PAT = text(
     "update personal_access_tokens set revoked_at = now() where organization_id = :o and id = :t"
-    " and revoked_at is null returning id"
+    " and user_id = coalesce(cast(:u as uuid), user_id) and revoked_at is null returning id"
+)
+_ALREADY_REVOKED = text(
+    "select 1 from personal_access_tokens where organization_id = :o and id = :t"
+    " and user_id = coalesce(cast(:u as uuid), user_id) and revoked_at is not null"
+)
+_PAT_COLS = "id, name, created_at, revoked_at"  # never token_hash or token_prefix
+_LIST_PATS = text(
+    f"select {_PAT_COLS}, count(*) over () as total from personal_access_tokens"
+    " where organization_id = :o and user_id = :u order by created_at desc, id offset :skip limit :limit"
+)
+_ONE_PAT = text(
+    f"select {_PAT_COLS} from personal_access_tokens where organization_id = :o and user_id = :u and id = :t"
 )
 
 
@@ -96,9 +109,37 @@ async def create_pat(
     return pat_id, raw
 
 
-async def revoke_pat(session: AsyncSession, organization_id: uuid.UUID, pat_id: uuid.UUID) -> None:
+async def revoke_pat(
+    session: AsyncSession, organization_id: uuid.UUID, pat_id: uuid.UUID,
+    user_id: uuid.UUID | None = None,
+) -> None:  # fmt: skip
     o = organization_id
-    row = (await session.execute(_REVOKE_PAT, {"o": o, "t": pat_id})).first()
+    params = {"o": o, "t": pat_id, "u": user_id}
+    if (await session.execute(_REVOKE_PAT, params)).first() is None:
+        # idempotent for the owner: a retried revoke is done, not "not found"; others still get 404
+        if (await session.execute(_ALREADY_REVOKED, params)).first() is not None:
+            return
+        raise NotFoundError
+    await audit.record(
+        session, o, "personal_access_token", pat_id, "revoked",
+        "user" if user_id else "system", user_id,
+    )  # fmt: skip
+
+
+async def list_pats(
+    session: AsyncSession, org: uuid.UUID, user_id: uuid.UUID, skip: int, limit: int
+) -> tuple[list[dict], int]:
+    params = {"o": org, "u": user_id, "skip": skip, "limit": limit}
+    rows = (await session.execute(_LIST_PATS, params)).mappings().all()
+    return [dict(r) for r in rows], (rows[0]["total"] if rows else 0)
+
+
+async def get_pat(
+    session: AsyncSession, org: uuid.UUID, user_id: uuid.UUID, pat_id: uuid.UUID
+) -> dict:
+    row = (
+        (await session.execute(_ONE_PAT, {"o": org, "u": user_id, "t": pat_id})).mappings().first()
+    )
     if row is None:
         raise NotFoundError
-    await audit.record(session, o, "personal_access_token", pat_id, "revoked", "system")
+    return dict(row)

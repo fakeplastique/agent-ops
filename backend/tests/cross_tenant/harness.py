@@ -49,6 +49,18 @@ ROUTES: dict[tuple[str, str], str] = {
         "GET",
         "/api/v1/decision-requests/{decision_request_id}/receipt",
     ): "tenant B reads tenant A's receipt",
+    # S21, probed with every principal by tests/cross_tenant/test_rest_routes.py.
+    ("GET", "/api/v1/agents/{agent_id}"): "tenant B reads tenant A's agent",
+    ("DELETE", "/api/v1/agents/{agent_id}"): "tenant B revokes tenant A's agent",
+    ("POST", "/api/v1/agents/{agent_id}/rotate"): "tenant B mints a token for tenant A's agent",
+    ("GET", "/api/v1/teams/{team_id}"): "tenant B reads tenant A's team",
+    ("PATCH", "/api/v1/teams/{team_id}"): "tenant B renames or moves tenant A's team",
+    ("DELETE", "/api/v1/teams/{team_id}"): "tenant B deletes tenant A's team",
+    ("GET", "/api/v1/escalation-policies/{policy_id}"): "tenant B reads tenant A's policy",
+    ("PATCH", "/api/v1/escalation-policies/{policy_id}"): "tenant B edits tenant A's policy",
+    ("DELETE", "/api/v1/escalation-policies/{policy_id}"): "tenant B deletes tenant A's policy",
+    ("GET", "/api/v1/me/tokens/{token_id}"): "tenant B reads tenant A's personal token",
+    ("DELETE", "/api/v1/me/tokens/{token_id}"): "tenant B revokes tenant A's personal token",
 }
 
 # Routes that carry no tenant data.
@@ -73,6 +85,10 @@ EXEMPT: set[str] = {
     "/api/v1/receipts/verify",
     # The tenant comes from the caller; a foreign decision_request_id filter is empty (tests/api/test_audit.py).
     "/api/v1/audit-logs",
+    "/api/v1/agents",  # create and list: the tenant comes from the caller
+    "/api/v1/teams",  # same; a foreign parent_team_id is 404 (tests/api/test_teams.py)
+    "/api/v1/me/tokens",  # the caller's own tokens: create and list take no foreign id
+    "/api/v1/escalation-policies",  # same; a foreign team_id is 404 (tests/api/test_policies.py)
 }
 
 
@@ -89,10 +105,11 @@ def api_routes(router, prefix: str = ""):
 
 
 def unregistered(app: FastAPI) -> list[tuple[str, str]]:
-    registered = {path for _, path in ROUTES}
+    # (method, path): a new method on a listed path is a new way in and needs its own row
     return sorted(
         (m, path)
         for path, r in api_routes(app)
-        if path not in EXEMPT and path not in registered
+        if path not in EXEMPT
         for m in (r.methods or ())
+        if (m, path) not in ROUTES
     )

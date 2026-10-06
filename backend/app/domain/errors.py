@@ -146,3 +146,32 @@ class LastOrgAdmin(DomainError):
 
 class SlugTaken(DomainError):
     code = "slug_taken"
+
+
+class AlreadyExists(DomainError):
+    code = "already_exists"
+
+
+class TeamInUse(DomainError):
+    code = "team_in_use"
+
+    def __init__(self) -> None:
+        super().__init__("the team still has sub-teams, members, invitations or a policy")
+
+
+class PlanFeatureRequired(DomainError):
+    code = "plan_feature_required"
+
+    def __init__(self, flag: str = "", required_plan: str = "") -> None:
+        super().__init__(f"the {required_plan} plan is needed for {flag}")
+        self.details = {"flag": flag, "required_plan": required_plan}
+
+
+class PolicyAbovePlan(DomainError):
+    """Saving a policy the plan cannot run: rejected inline with the limit named, never clamped."""
+
+    code = "policy_above_plan"
+
+    def __init__(self, limit: str = "", maximum: int = 0, value: int = 0, plan: str = "") -> None:
+        super().__init__(f"the {plan} plan allows {limit} up to {maximum}")
+        self.details = {"limit": limit, "max": maximum, "value": value, "plan": plan}
