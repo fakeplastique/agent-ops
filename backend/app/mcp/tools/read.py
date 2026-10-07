@@ -20,6 +20,8 @@ from app.domain.risk import ACTION_TYPE
 from app.domain.statuses import TERMINAL, Status
 from app.mcp.auth import current_principal
 from app.services import agents, decision_reads, policies, receipts, votes
+from app.services.sessions import LABEL_MAX
+from app.services.validation import check_text
 
 MAX_WAIT = 30  # seconds; a longer wait would hold a worker per idle agent
 _sleep = asyncio.sleep  # tests swap it to count the wait
@@ -86,6 +88,9 @@ async def _viewer(s, p: Principal, label: str | None) -> uuid.UUID | None:
     # The viewer's session comes from the authenticated identity plus its own label, never an id argument.
     if not isinstance(p, AgentPrincipal) or label is None:
         return None
+    check_text(
+        "session label", label, 1, LABEL_MAX
+    )  # NUL or a lone surrogate would crash in asyncpg
     return await decision_reads.find_session(s, p.organization_id, p.agent_id, label)
 
 

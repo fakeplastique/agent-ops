@@ -109,3 +109,14 @@ async def test_get_policy_effective_for_action_type_and_risk(mcp, owner_engine, 
     assert (high["effective_risk_level"], high["auto_approve_possible"]) == ("high", False)
     assert unlisted["effective_risk_level"] == "medium"  # an unlisted action type floors at medium
     assert bad.is_error and "action_type" in bad.content[0].text  # says what to fix
+
+
+async def test_bad_session_label_is_an_actionable_tool_error(mcp, owner_engine, app_engine):
+    w = await make_world(owner_engine)
+    req = await open_request(app_engine, w)
+    async with mcp.client(await agent_auth(app_engine, w.org, w.identity)) as c:
+        r = await c.call_tool(
+            "get_decision", {"decision_id": str(req["id"]), "session_label": "a\x00b"}
+        )
+    # catches: a NUL reaching Postgres and coming back as an opaque "Error executing tool"
+    assert r.is_error and "session label" in r.content[0].text
