@@ -75,10 +75,15 @@ async def change_plan(
     if old == plan:
         return
     change: dict[str, Any] = {"from": old, "to": plan}
+    # A platform admin is no member of this tenant: its trail names no foreign user as actor.
+    if via == "platform":
+        actor: tuple[str, uuid.UUID | None] = ("platform", None)
+        data = change | {"via": via, "platform_admin_id": str(actor_id)}
+    else:
+        actor, data = ("user", actor_id), change | {"via": via}
     await audit.record(
-        session, organization_id, "organization", organization_id, "plan_changed", "user",
-        actor_id, change | {"via": via},
-    )  # fmt: skip
+        session, organization_id, "organization", organization_id, "plan_changed", *actor, data
+    )
     await outbox.emit(
         session, organization_id, "plan.changed", {"organization_id": str(organization_id)} | change
     )
