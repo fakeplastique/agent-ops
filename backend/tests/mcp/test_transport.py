@@ -80,3 +80,20 @@ async def test_main_app_serves_mcp_at_the_exact_path(owner_engine, app_engine, m
     # catches: /mcp not mounted, redirected to /mcp/, or the SDK's task group never started
     assert anon.status_code == 401 and anon.json()["error"] == "invalid_token"
     assert r.status_code == 200 and READ_TOOLS <= {t["name"] for t in r.json()["result"]["tools"]}
+
+
+async def test_authenticated_get_is_405_not_an_open_stream(mcp, owner_engine, app_engine):
+    import anyio
+
+    w = await make_world(owner_engine)
+    headers = await agent_auth(app_engine, w.org, w.identity)
+    async with mcp.http(headers) as http:
+        with anyio.fail_after(3):  # catches: an idle SSE stream held open per live token
+            got = await http.get("/mcp", headers={"Accept": "text/event-stream"})
+            deleted = await http.delete("/mcp")
+        anon = await http.get("/mcp", headers={"Authorization": ""})
+    assert (got.status_code, got.headers.get("allow")) == (405, "POST")
+    assert deleted.status_code == 405
+    assert anon.status_code == 401  # auth first: no method hint for a caller without a token
+    async with mcp.client(headers) as c:  # the real client still works without the GET stream
+        assert READ_TOOLS <= {t.name for t in (await c.list_tools()).tools}

@@ -18,7 +18,7 @@ from app.db.session import tenant_session
 from app.domain.errors import DomainError
 from app.domain.risk import ACTION_TYPE
 from app.domain.statuses import TERMINAL, Status
-from app.mcp.auth import current_principal
+from app.mcp.auth import current_principal, reverify
 from app.services import agents, decision_reads, policies, receipts, votes
 from app.services.sessions import LABEL_MAX
 from app.services.validation import check_text
@@ -191,6 +191,7 @@ async def get_decision_result(
             if out.final:
                 return out
             await _sleep(1)  # outside the transaction: a waiting agent holds no connection
+            await reverify()  # a token revoked mid-wait stops being served within a second
         return await _result(p, decision_id, session_label)
 
 

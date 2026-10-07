@@ -38,3 +38,10 @@ def current_principal() -> Principal:
     if c["kind"] == "agent":
         return AgentPrincipal(subject, org)
     return UserPrincipal(subject, org, Role[c["role"]])
+
+
+async def reverify() -> None:
+    """Re-check this request's token against the database (a long wait must not outlive a revoke)."""
+    token = get_access_token()
+    if token is None or await BearerVerifier().verify_token(token.token) is None:
+        raise Unauthenticated

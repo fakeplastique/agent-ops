@@ -1,9 +1,13 @@
 import os
 
+from mcp.server.auth.middleware.bearer_auth import AuthenticatedUser
 from mcp.server.auth.settings import AuthSettings
 from mcp.server.mcpserver import MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
 from starlette.applications import Starlette
+from starlette.responses import PlainTextResponse
+from starlette.routing import Route
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from app.config import settings
 from app.mcp import resources
@@ -41,8 +45,29 @@ def _security() -> TransportSecuritySettings:
     )
 
 
+class PostOnly:
+    """Stateless JSON replies need only POST: a GET would open an SSE stream that never closes, per token.
+
+    Sits outside the SDK's RequireAuthMiddleware but after its authentication, so a caller without a valid
+    token still gets the same 401 and learns nothing about methods."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["method"] != "POST" and isinstance(scope.get("user"), AuthenticatedUser):
+            await PlainTextResponse("POST only", 405, headers={"Allow": "POST"})(
+                scope, receive, send
+            )
+            return
+        await self.app(scope, receive, send)
+
+
 def http_app() -> Starlette:
     """A fresh Streamable HTTP app at /mcp (stateless, JSON replies); its lifespan runs the SDK's task group."""
-    return mcp.streamable_http_app(
+    app = mcp.streamable_http_app(
         stateless_http=True, json_response=True, transport_security=_security()
     )
+    (route,) = [r for r in app.routes if isinstance(r, Route) and r.path == "/mcp"]
+    route.app = PostOnly(route.app)
+    return app

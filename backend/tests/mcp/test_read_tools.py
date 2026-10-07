@@ -120,3 +120,37 @@ async def test_bad_session_label_is_an_actionable_tool_error(mcp, owner_engine, 
         )
     # catches: a NUL reaching Postgres and coming back as an opaque "Error executing tool"
     assert r.is_error and "session label" in r.content[0].text
+
+
+async def test_get_decision_result_stops_serving_a_token_revoked_mid_wait(
+    mcp, owner_engine, app_engine, monkeypatch
+):
+    from app.db.session import tenant_session
+    from app.services.tokens import revoke_agent
+
+    w = await make_world(owner_engine)
+    req = await open_request(app_engine, w)
+    slept = []
+
+    async def revoke_on_first_sleep(seconds: float) -> None:
+        if not slept:
+            async with tenant_session(app_engine, w.org) as s:
+                await revoke_agent(s, w.org, w.identity)
+        slept.append(seconds)
+
+    monkeypatch.setattr(read, "_sleep", revoke_on_first_sleep)
+    args = {"decision_id": str(req["id"]), "wait_seconds": 30}
+    body = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/call",
+        "params": {"name": "get_decision_result", "arguments": args},
+    }
+    # raw POST: the real client re-lists tools after a call, which the revoked token can no longer do
+    async with mcp.http(await agent_auth(app_engine, w.org, w.identity)) as http:
+        r = await http.post(
+            "/mcp", json=body, headers={"Accept": "application/json, text/event-stream"}
+        )
+    result = r.json()["result"]
+    # catches: a revoked token still served for the rest of a 30 s wait
+    assert result["isError"] and "credentials" in result["content"][0]["text"] and len(slept) == 1
