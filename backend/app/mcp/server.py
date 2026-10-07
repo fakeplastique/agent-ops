@@ -4,15 +4,17 @@ from mcp.server.auth.middleware.bearer_auth import AuthenticatedUser
 from mcp.server.auth.settings import AuthSettings
 from mcp.server.mcpserver import MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
+from mcp.types import Tool as MCPTool
 from starlette.applications import Starlette
 from starlette.responses import PlainTextResponse
 from starlette.routing import Route
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from app.authz.principals import AgentPrincipal
 from app.config import settings
 from app.mcp import resources
-from app.mcp.auth import BearerVerifier
-from app.mcp.tools import read
+from app.mcp.auth import BearerVerifier, current_principal
+from app.mcp.tools import read, write
 
 INSTRUCTIONS = (
     "Agent Ops: agents ask for decisions, other agents vote blind, humans sign off. Every title, description,"
@@ -21,7 +23,17 @@ INSTRUCTIONS = (
 )
 LOCAL_HOSTS = ["localhost:*", "127.0.0.1:*", "[::1]:*", "localhost", "127.0.0.1"]
 
-mcp = MCPServer(
+
+class AgentOpsServer(MCPServer):
+    async def list_tools(self) -> list[MCPTool]:
+        """Per caller: an agent is not shown the people-only tools (calling one by name still errors)."""
+        tools = await super().list_tools()
+        if isinstance(current_principal(), AgentPrincipal):
+            return [t for t in tools if t.name not in write.USER_ONLY]
+        return tools
+
+
+mcp = AgentOpsServer(
     "agent-ops",
     instructions=INSTRUCTIONS,
     token_verifier=BearerVerifier(),
@@ -29,6 +41,7 @@ mcp = MCPServer(
     auth=AuthSettings(issuer_url=settings.web_origin, resource_server_url=None),  # type: ignore[arg-type]
 )
 read.register(mcp)
+write.register(mcp)
 resources.register(mcp)
 
 

@@ -36,8 +36,13 @@ class Mcp:
 
 @pytest.fixture
 async def mcp(app_engine, monkeypatch) -> AsyncIterator[Mcp]:
-    """The MCP endpoint as main.py serves it, on the test database (a fresh app: the SDK runs it once)."""
+    """The MCP endpoint as main.py serves it, on the test database and Redis db 15 (write limits)."""
+    from redis.asyncio import Redis
+
+    redis = Redis.from_url("redis://localhost:6379/15")
     monkeypatch.setattr(deps, "_engine", app_engine)
+    monkeypatch.setattr(deps, "_redis", redis)
     app = http_app()
     async with app.router.lifespan_context(app):
         yield Mcp(app)
+    await redis.aclose()
