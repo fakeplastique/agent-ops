@@ -28,11 +28,6 @@ from .helpers import fetch, make_org, make_team, make_world, set_usage, staff
 
 pytestmark = pytest.mark.anyio
 
-# The spec 6 table, written out by hand: the oracle for details.required_plan.
-CHEAPEST = {
-    "attachments": "pro", "telegram": "pro", "analytics": "pro",
-    "search": "enterprise", "team_policies": "enterprise", "audit_export": "enterprise",
-}  # fmt: skip
 PLAN = "/api/v1/organizations/current/plan"
 EP = "/api/v1/escalation-policies"
 POLICY = {
@@ -40,6 +35,17 @@ POLICY = {
     "quorum_size": 3,
     "levels": [{"role": "manager", "timeout_minutes": 60}],
 }
+
+
+async def cheapest_plans(owner_engine) -> dict[str, str]:
+    """flag -> the cheapest plan with it, from the seed (fewest requests first, unlimited last)."""
+    rows = await fetch(
+        owner_engine,
+        "select distinct on (pf.flag_key) pf.flag_key, p.key from plan_features pf"
+        " join plans p on p.key = pf.plan_key"
+        " order by pf.flag_key, p.requests_per_month nulls last",
+    )
+    return dict(rows)
 
 
 def _platform(org) -> str:
@@ -129,6 +135,7 @@ async def test_every_gated_route_and_tool_returns_402_with_required_plan_and_fla
     owner_engine,
 ):
     probe, _ = probed
+    cheapest = await cheapest_plans(owner_engine)
     free, free_admin = await _admin(owner_engine, app_engine, "free")
     _, ent_admin = await _admin(owner_engine, app_engine, "enterprise")
     seen = 0
@@ -141,7 +148,7 @@ async def test_every_gated_route_and_tool_returns_402_with_required_plan_and_fla
             assert r.status_code == 402, (method, path, r.text)
             err = r.json()["error"]
             assert err["code"] == "plan_feature_required"
-            assert err["details"] == {"flag": g.flag, "required_plan": CHEAPEST[g.flag]}
+            assert err["details"] == {"flag": g.flag, "required_plan": cheapest[g.flag]}
             ok = await c.request(method, url, json=g.probe, headers=ent_admin)
             assert ok.status_code != 402, (method, path, ok.text)  # the gate reads the plan
             seen += 1
@@ -153,7 +160,7 @@ async def test_every_gated_route_and_tool_returns_402_with_required_plan_and_fla
                 assert r.is_error, (name, r.structured_content)
                 msg = r.content[0].text
                 assert "plan feature required: the" in msg, msg
-                assert f"the {CHEAPEST[flag]} plan is needed for {flag}" in msg, msg
+                assert f"the {cheapest[flag]} plan is needed for {flag}" in msg, msg
                 seen += 1
     async with mcp.client(ent_admin) as client:
         for name in tools:
@@ -248,6 +255,51 @@ async def test_plan_function_refuses_another_tenant(app_engine, owner_engine):
     ]
 
 
+async def test_plan_function_ignores_a_temp_table_shadowing_organizations(app_engine, owner_engine):
+    org = await make_org(owner_engine, "free")
+    # catches: pg_temp searched first inside the SECURITY DEFINER body, so app_rt's own temp table
+    # and trigger run as the function owner
+    async with tenant_session(app_engine, org) as s:
+        await s.execute(
+            text("create temp table organizations (id uuid, plan_key text, updated_at timestamptz)")
+        )
+        await s.execute(text("insert into pg_temp.organizations values (:o, 'free')"), {"o": org})
+        await s.execute(
+            text(
+                "create function pg_temp.evil() returns trigger language plpgsql as $$"
+                " begin raise exception 'attacker code ran as %', current_user; end $$"
+            )
+        )
+        await s.execute(
+            text(
+                "create trigger evil before update on pg_temp.organizations"
+                " for each row execute function pg_temp.evil()"
+            )
+        )
+        old = await s.scalar(text("select set_organization_plan(:o, 'pro')"), {"o": org})
+    assert old == "free"
+    assert await fetch(owner_engine, "select plan_key from organizations where id=:o", o=org) == [
+        ("pro",)
+    ]
+
+
+async def test_every_security_definer_function_pins_search_path_and_is_not_public(owner_engine):
+    rows = await fetch(
+        owner_engine,
+        "select p.proname, p.proconfig, has_function_privilege('public', p.oid, 'EXECUTE')"
+        " from pg_proc p join pg_namespace n on n.oid = p.pronamespace"
+        " where p.prosecdef and n.nspname = 'public'",
+    )
+    assert rows, "no SECURITY DEFINER function found: the guard would pass on nothing"
+    for name, config, public_exec in rows:
+        paths = [
+            c.removeprefix("search_path=") for c in config or [] if c.startswith("search_path=")
+        ]
+        # catches: a definer function that lets the caller's pg_temp (or search_path) shadow its tables
+        assert paths and paths[0].replace(" ", "").split(",")[-1] == "pg_temp", (name, config)
+        assert not public_exec, name
+
+
 async def test_switch_takes_effect_on_next_request_and_emits_plan_changed_and_audit(
     web, app_engine, owner_engine, monkeypatch
 ):
@@ -279,7 +331,14 @@ async def test_switch_takes_effect_on_next_request_and_emits_plan_changed_and_au
         " and entity_type='organization' and action='plan_changed'",
         o=org,
     )
-    assert audit == [("user", boss, {"from": "free", "to": "enterprise", "via": "platform"})]
+    # A platform admin is not a member: the tenant's trail names no foreign user as actor.
+    assert audit == [
+        ("platform", None, {"from": "free", "to": "enterprise", "via": "platform",
+                            "platform_admin_id": str(boss)})
+    ]  # fmt: skip
+    trail = (await web.client.get("/api/v1/audit-logs", headers=admin)).json()["items"]
+    (row,) = [e for e in trail if e["action"] == "plan_changed"]
+    assert (row["actor_type"], row["actor_id"]) == ("platform", None)
     events = await fetch(
         owner_engine,
         "select payload from outbox_events where organization_id=:o and type='plan.changed'",
