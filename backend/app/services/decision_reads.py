@@ -5,6 +5,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.errors import NotFoundError
+from app.domain.statuses import TERMINAL, Status
 from app.services.validation import check_text
 
 # Explicit columns: the policy snapshot, receipt, search vector and session ids never leave this module.
@@ -18,12 +19,15 @@ _FROM = (
     " from decision_requests d left join agent_sessions a"
     " on a.organization_id = d.organization_id and a.id = d.requested_by_session_id"
 )
+_OPEN = ", ".join(f"'{s.value}'" for s in Status if s not in TERMINAL)  # undecided, from the enum
 # ponytail: `q` is an ILIKE scan within one org; add a trigram index if per-org lists grow large.
 _FILTER = (
     " where d.organization_id = :o and (cast(:status as text) is null or d.status = :status)"
     " and (cast(:risk as text) is null or d.effective_risk_level = :risk)"
     " and (cast(:agent as uuid) is null or a.agent_identity_id = :agent)"
     " and (cast(:q as text) is null or d.title ilike :q escape '\\')"
+    " and (cast(:user as uuid) is null or d.requested_by_user_id = :user)"
+    f" and (not cast(:open as boolean) or d.status in ({_OPEN}))"
 )
 # Allow-listed sort keys; `id` breaks ties in the same direction so pages never overlap.
 SORTS = {
@@ -72,9 +76,13 @@ async def list_decisions(
     sort: str,
     skip: int,
     limit: int,
+    user_id: uuid.UUID | None = None,
+    open_only: bool = False,
 ) -> tuple[list[dict[str, Any]], int]:
-    """Filters combine with AND; `risk_level` matches the effective risk (what routes the request)."""
+    """Filters combine with AND; `risk_level` matches the effective risk (what routes the request).
+    `open_only` keeps the undecided ones (MCP list_open_decisions), `user_id` a person's own requests."""
     args = {"o": o, "status": status, "risk": risk_level, "agent": agent_id, "q": _like(q)}
+    args |= {"user": user_id, "open": open_only}
     total = await session.scalar(text(f"select count(*){_FROM}{_FILTER}"), args)
     page = text(
         f"select {_COLUMNS}{_FROM}{_FILTER} order by {SORTS[sort]} limit :limit offset :skip"

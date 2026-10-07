@@ -25,6 +25,8 @@ class Settings(BaseSettings):
     oidc_issuer: str = "https://accounts.google.com"
     oidc_client_id: str = ""
     oidc_client_secret: str = ""
+    # Comma-separated public hostnames the MCP endpoint answers on (else the SDK's rebinding guard says 421).
+    mcp_allowed_hosts: str = ""
     # `kid:secret,kid:secret`; the last signs, all verify. Hosted runs must set their own.
     receipt_keys: str = DEV_RECEIPT_KEYS
 
