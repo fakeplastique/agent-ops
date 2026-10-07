@@ -10,6 +10,8 @@ from app.api.v1 import (
     members,
     messages,
     organizations,
+    plan,
+    platform,
     policies,
     receipts,
     steps,
@@ -34,5 +36,7 @@ api_v1_router.include_router(agents.router)
 api_v1_router.include_router(teams.router)
 api_v1_router.include_router(policies.router)
 api_v1_router.include_router(tokens.router)
+api_v1_router.include_router(plan.router)
+api_v1_router.include_router(platform.router)
 
 __all__ = ["api_v1_router"]

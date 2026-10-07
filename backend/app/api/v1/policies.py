@@ -7,12 +7,19 @@ from pydantic import BaseModel, Field, StringConstraints
 
 from app.api.deps import ActorDep, AdminDep, EngineDep, write_limit
 from app.api.errors import error_responses
+from app.api.gating import gate
 from app.api.pagination import Page, PaginationParams, paginate
 from app.api.schemas.base import BaseSchema
 from app.db.session import tenant_session
 from app.services import policies
 
 router = APIRouter(prefix="/escalation-policies", tags=["escalation-policies"])
+# A per-team policy needs the flag; the org default does not (the service checks again for other callers).
+TEAM_GATE = gate(
+    policies.TEAM_FLAG,
+    when=lambda body: body.get("team_id") is not None,
+    probe={"team_id": str(uuid.uuid4()), "levels": [{"role": "manager", "timeout_minutes": 60}]},
+)
 
 # strict: a bool or a numeric string never passes as a count (True must not become quorum 1).
 Count = Annotated[int, Field(ge=1, le=10_000, strict=True)]
@@ -73,7 +80,7 @@ class PolicyOut(BaseModel):
     "",
     status_code=201,
     response_model=PolicyOut,
-    dependencies=[Depends(write_limit)],
+    dependencies=[Depends(write_limit), Depends(TEAM_GATE)],
     responses=error_responses(402, 409),
 )
 async def create(

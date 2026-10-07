@@ -118,12 +118,13 @@ def _routes(router: Any):
 
 
 def document_errors(app: FastAPI) -> None:
-    """Add the 401/403/404/422/429 a route's dependencies can raise; 400/402/409 the route declares itself."""
+    """Add the 401/402/403/404/422/429 a route's dependencies can raise; 400/409 (and a service 402) the route declares."""
     for r in _routes(app):
         calls = _calls(r.dependant)
         codes = [
             *([401] if calls & _AUTH else []),
             *([403] if calls & _ROLE else []),
+            *([402] if "plan_gate" in calls else []),  # app/api/gating.Gate
             *([404] if r.param_convertors else []),
             *([422] if get_flat_params(r.dependant) or r.body_field else []),  # FastAPI's own rule
             *([429] if calls & _LIMIT else []),
