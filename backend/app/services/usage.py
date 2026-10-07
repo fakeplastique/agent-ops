@@ -7,8 +7,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.domain.errors import PlanLimitReached
 from app.ports.clock import Clock
 
+_UPGRADE = {"free": "Pro", "pro": "Enterprise"}
 _LIMIT = text(
-    "select p.requests_per_month from organizations o join plans p on p.key = o.plan_key"
+    "select p.requests_per_month, p.key from organizations o join plans p on p.key = o.plan_key"
     " where o.id = :o"
 )
 # ON CONFLICT DO UPDATE locks the row and re-checks the WHERE after the lock: two callers racing
@@ -33,6 +34,10 @@ async def consume(
     period = clock.now().astimezone(UTC).strftime("%Y-%m")
     args = {"o": organization_id, "m": metric, "p": period, "lim": row[0]}
     value = (await session.execute(_CONSUME, args)).scalar_one_or_none()
-    if value is None:
-        raise PlanLimitReached
+    if value is None:  # the spec's actionable text: what is spent and what lifts it
+        up = _UPGRADE.get(row[1], "a larger plan")
+        raise PlanLimitReached(
+            f"quota {row[0]}/{row[0]} {metric} used this month on the {row[1]} plan: upgrade to {up}"
+            " or wait for next month"
+        )
     return value
