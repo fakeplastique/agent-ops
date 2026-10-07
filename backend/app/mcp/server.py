@@ -6,6 +6,7 @@ from mcp.server.transport_security import TransportSecuritySettings
 from starlette.applications import Starlette
 
 from app.config import settings
+from app.mcp import resources
 from app.mcp.auth import BearerVerifier
 from app.mcp.tools import read
 
@@ -24,6 +25,7 @@ mcp = MCPServer(
     auth=AuthSettings(issuer_url=settings.web_origin, resource_server_url=None),  # type: ignore[arg-type]
 )
 read.register(mcp)
+resources.register(mcp)
 
 
 def _security() -> TransportSecuritySettings:
