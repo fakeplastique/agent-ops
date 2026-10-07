@@ -8,15 +8,29 @@ from app.main import app
 
 client = TestClient(app)
 SPEC = "/api/v1/openapi.json"
-# Shown once, at creation or rotation: the only response schemas allowed to carry a raw `token`.
+# Shown once, at creation or rotation: the only operations whose response may carry a raw `token`.
 TOKEN_ONCE = {
     ("post", "/api/v1/agents"),
     ("post", "/api/v1/agents/{agent_id}/rotate"),
     ("post", "/api/v1/invitations"),
     ("post", "/api/v1/me/tokens"),
 }
-STORAGE = re.compile(r"(^|_)(hash|digest|secret|ciphertext|password|prefix|salt)($|_)")
-PUBLIC_FIELDS = {"content_hash"}  # the signed request digest a receipt carries: public on purpose
+SENSITIVE = re.compile(
+    r"token|key|secret|hash|digest|ciphertext|password|prefix|salt|signature", re.IGNORECASE
+)
+# Every (schema, field) a SENSITIVE name may appear as; anything else in a response is a leak.
+ALLOWED = {
+    ("AgentCreated", "token"),  # POST /agents: the new agent's token, shown once
+    ("AgentToken", "token"),  # POST /agents/{id}/rotate: the replacement token, shown once
+    ("InvitationCreated", "token"),  # POST /invitations: the invite link token, shown once
+    ("PatCreated", "token"),  # POST /me/tokens: the new PAT, shown once
+    (
+        "DecisionOut",
+        "content_hash",
+    ),  # digest of the request content a receipt signs: public by design
+    ("ReceiptOut", "signature"),  # the receipt's own signature: holders need it to verify
+    ("OrganizationOut", "plan_key"),  # the plan's name (free/pro/enterprise), not a credential
+}
 # Only the service knows these, so the table is by hand; the test fails on a doc that drifts either way.
 CONFLICT = {
     ("post", "/api/v1/organizations"),
@@ -69,8 +83,24 @@ def _schemas(spec: dict, node, seen: set[str]) -> set[str]:
     return seen
 
 
-def _fields(spec: dict, names: set[str]) -> set[str]:
-    return {f for n in names for f in spec["components"]["schemas"][n].get("properties", {})}
+def _named_fields(node, owner: str, out: set[tuple[str, str]]) -> None:
+    """(schema, field) for every property name under `node`: nested objects, items, additionalProperties, $defs."""
+    if isinstance(node, dict):
+        for name in node.get("properties", {}):
+            out.add((owner, name))
+        for v in node.values():
+            _named_fields(v, owner, out)
+    elif isinstance(node, list):
+        for v in node:
+            _named_fields(v, owner, out)
+
+
+def _fields(spec: dict, op: dict) -> set[tuple[str, str]]:
+    out: set[tuple[str, str]] = set()
+    _named_fields(op["responses"], "<inline>", out)
+    for name in _schemas(spec, op["responses"], set()):
+        _named_fields(spec["components"]["schemas"][name], name, out)
+    return out
 
 
 def test_openapi_and_docs_are_served_under_the_api_prefix():
@@ -82,14 +112,16 @@ def test_openapi_and_docs_are_served_under_the_api_prefix():
 
 def test_no_response_schema_exposes_hash_secret_or_ciphertext_fields():
     spec = _spec()
-    with_token = set()
+    with_token, seen = set(), set()
     for method, path, op in _ops(spec):
-        fields = _fields(spec, _schemas(spec, op["responses"], set()))
-        leaked = {f for f in fields if STORAGE.search(f)} - PUBLIC_FIELDS
+        fields = _fields(spec, op)
+        seen |= fields
+        leaked = {f for f in fields if SENSITIVE.search(f[1])} - ALLOWED
         assert not leaked, (method, path, leaked)
-        if "token" in fields:
+        if any(f == "token" for _, f in fields):
             with_token.add((method, path))
     assert with_token == TOKEN_ONCE
+    assert ALLOWED <= seen, ALLOWED - seen  # a stale allowance would excuse a future leak
 
 
 def test_every_route_documents_error_responses():
