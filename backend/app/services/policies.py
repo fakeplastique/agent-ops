@@ -15,7 +15,7 @@ from app.domain.errors import (
     PolicyExceedsPlan,
     PolicyUnresolved,
 )
-from app.domain.risk import ACTION_TYPE
+from app.domain.risk import ACTION_TYPE, effective_risk
 from app.services import audit, features
 from app.services.validation import check_text
 
@@ -128,6 +128,17 @@ async def resolve_policy(
         "voting_timeout_minutes": row["voting_timeout_minutes"],
         "risk_floors": row["risk_floors"],
     }
+
+
+async def effective_policy(
+    session: AsyncSession, organization_id: uuid.UUID, owner_user_id: uuid.UUID,
+    action_type: Any, risk_level: Any,
+) -> dict[str, Any]:  # fmt: skip
+    """What a request of this action type and declared risk would get now: the same resolution as create."""
+    snapshot = await resolve_policy(session, organization_id, owner_user_id)
+    effective = effective_risk(risk_level, action_type, snapshot["risk_floors"])
+    policy = {k: v for k, v in snapshot.items() if k != "owner_team_id"}
+    return {"policy": policy, "effective_risk_level": effective.name.lower()}
 
 
 async def _over_plan(
