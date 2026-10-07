@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, Request, Response
 from pydantic import BaseModel, Field
 
 from app.api.deps import ActorDep, AdminDep, EngineDep, write_limit
+from app.api.errors import error_responses
 from app.api.pagination import Page, PaginationParams, paginate
 from app.api.schemas.base import BaseSchema
 from app.db.session import tenant_session
@@ -31,7 +32,13 @@ class TeamOut(BaseModel):
     created_at: datetime
 
 
-@router.post("", status_code=201, response_model=TeamOut, dependencies=[Depends(write_limit)])
+@router.post(
+    "",
+    status_code=201,
+    response_model=TeamOut,
+    dependencies=[Depends(write_limit)],
+    responses=error_responses(409),
+)
 async def create(body: TeamIn, response: Response, admin: AdminDep, engine: EngineDep) -> TeamOut:
     async with tenant_session(engine, admin.organization_id) as s:
         row = await teams.create_team(
@@ -57,7 +64,12 @@ async def get_team(team_id: uuid.UUID, actor: ActorDep, engine: EngineDep) -> Te
         return TeamOut(**await teams.get_team(s, actor.organization_id, team_id))
 
 
-@router.patch("/{team_id}", response_model=TeamOut, dependencies=[Depends(write_limit)])
+@router.patch(
+    "/{team_id}",
+    response_model=TeamOut,
+    dependencies=[Depends(write_limit)],
+    responses=error_responses(409),
+)
 async def update(
     team_id: uuid.UUID, body: TeamPatch, admin: AdminDep, engine: EngineDep
 ) -> TeamOut:
@@ -69,7 +81,12 @@ async def update(
         )
 
 
-@router.delete("/{team_id}", status_code=204, dependencies=[Depends(write_limit)])
+@router.delete(
+    "/{team_id}",
+    status_code=204,
+    dependencies=[Depends(write_limit)],
+    responses=error_responses(409),
+)
 async def delete(team_id: uuid.UUID, admin: AdminDep, engine: EngineDep) -> Response:
     async with tenant_session(engine, admin.organization_id) as s:
         await teams.delete_team(s, admin.organization_id, admin.user_id, team_id)

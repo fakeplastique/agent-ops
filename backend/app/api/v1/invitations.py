@@ -14,6 +14,7 @@ from app.api.deps import (
     user_write_limit,
     write_limit,
 )
+from app.api.errors import error_responses
 from app.api.pagination import Page, PaginationParams, paginate
 from app.api.schemas.base import BaseSchema
 from app.authz.origin import require_same_origin
@@ -95,6 +96,7 @@ class Joined(BaseModel):
     "/accept",
     response_model=Joined,
     dependencies=[Depends(require_same_origin), Depends(user_write_limit)],
+    responses=error_responses(404, 409),
 )
 async def accept(
     body: AcceptIn, request: Request, session: SessionDep, engine: EngineDep, clock: ClockDep

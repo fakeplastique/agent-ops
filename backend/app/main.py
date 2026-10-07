@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, Response
 
 from app.api import health
-from app.api.errors import register_error_handlers
+from app.api.errors import document_errors, register_error_handlers
 from app.api.limits import BodyLimitMiddleware
 from app.api.v1 import api_v1_router
 from app.config import settings
@@ -27,7 +27,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
 _REQUEST_ID = re.compile(r"[\w-]{1,64}")  # a client-sent id is echoed into logs: bound it
 
-app = FastAPI(title="Agent Ops", lifespan=lifespan)
+app = FastAPI(title="Agent Ops", lifespan=lifespan, openapi_url="/api/v1/openapi.json")
 app.add_middleware(BodyLimitMiddleware)
 
 
@@ -44,3 +44,4 @@ async def request_id_middleware(request: Request, call_next) -> Response:
 register_error_handlers(app)
 app.include_router(health.router)
 app.include_router(api_v1_router)
+document_errors(app)

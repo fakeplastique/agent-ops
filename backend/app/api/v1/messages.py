@@ -4,6 +4,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Request, Response
 
 from app.api.deps import ActorDep, ClockDep, EngineDep, write_limit
+from app.api.errors import error_responses
 from app.api.pagination import Page, PaginationParams, paginate
 from app.api.schemas.decisions import MessageIn, MessageOut, MessagePosted
 from app.api.v1.decisions import PATH, agent_session, user_of
@@ -13,7 +14,13 @@ from app.services import decision_reads, messages
 router = APIRouter(prefix="/decision-requests/{decision_request_id}/messages", tags=["messages"])
 
 
-@router.post("", status_code=201, response_model=MessagePosted, dependencies=[Depends(write_limit)])
+@router.post(
+    "",
+    status_code=201,
+    response_model=MessagePosted,
+    dependencies=[Depends(write_limit)],
+    responses=error_responses(409),
+)
 async def post(
     decision_request_id: uuid.UUID,
     body: MessageIn,

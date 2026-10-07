@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 from app.api import idempotency
 from app.api.deps import ActorDep, ClockDep, EngineDep, write_limit
+from app.api.errors import error_responses
 from app.api.pagination import Page, PaginationParams, paginate
 from app.api.schemas.base import BaseSchema
 from app.authz.principals import Principal, UserPrincipal
@@ -55,6 +56,7 @@ def require_user(actor: Principal) -> UserPrincipal:
     "/approval-steps/{step_id}/decide",
     response_model=DecideOut,
     dependencies=[Depends(write_limit)],
+    responses=error_responses(409),
 )
 async def decide(
     step_id: uuid.UUID,
