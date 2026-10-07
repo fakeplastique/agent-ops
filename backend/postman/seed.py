@@ -11,6 +11,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # the backend dir: `app` and `tests`
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.pool import NullPool
 
@@ -59,7 +60,9 @@ async def seed() -> dict[str, str]:
         # A second Free org that has used up this month's requests.
         full = await make_org(owner, "free")
         await make_member(owner, full, user := await make_user(owner))
-        await set_usage(owner, full, datetime.now(UTC).strftime("%Y-%m"), 50)
+        async with owner.connect() as c:
+            limit = await c.scalar(text("select requests_per_month from plans where key = 'free'"))
+        await set_usage(owner, full, datetime.now(UTC).strftime("%Y-%m"), limit)
         out["fullOrgToken"] = _token(
             await agent_auth(app, full, (await make_agent(owner, full, user))[0])
         )

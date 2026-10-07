@@ -821,7 +821,7 @@
           ]
         },
         {
-          "name": "first page",
+          "name": "walk pages",
           "request": {
             "method": "GET",
             "header": [
@@ -830,7 +830,7 @@
                 "value": "Bearer {{requesterToken}}"
               }
             ],
-            "url": "{{baseUrl}}/api/v1/decision-requests?q={{run}} page&limit=2"
+            "url": "{{pageUrl}}"
           },
           "event": [
             {
@@ -847,11 +847,12 @@
                   "pm.environment.set('pageSeen', JSON.stringify(seen));",
                   "const pages = Number(pm.environment.get('pages') || 0) + 1;",
                   "pm.environment.set('pages', pages);",
-                  "if (b.nextLink) {",
-                  "  pm.environment.set('nextLink', b.nextLink);",
-                  "  if (pm.info.requestName === 'next page') postman.setNextRequest('next page');",
+                  "if (b.nextLink && pages < 10) {",
+                  "  pm.environment.set('pageUrl', b.nextLink);",
+                  "  postman.setNextRequest('walk pages');",
                   "} else {",
                   "  pm.test('nextLink walked every item exactly once', () => {",
+                  "    pm.expect(b.nextLink, 'nextLink still set after 10 pages').to.be.null;",
                   "    pm.expect(b.total).to.eql(5);",
                   "    pm.expect(pages).to.eql(3);",
                   "    pm.expect(seen.length).to.eql(5);",
@@ -860,46 +861,14 @@
                   "}"
                 ]
               }
-            }
-          ]
-        },
-        {
-          "name": "next page",
-          "request": {
-            "method": "GET",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{requesterToken}}"
-              }
-            ],
-            "url": "{{nextLink}}"
-          },
-          "event": [
+            },
             {
-              "listen": "test",
+              "listen": "prerequest",
               "script": {
                 "exec": [
-                  "const b = pm.response.json();",
-                  "pm.test('200 page of at most 2', () => {",
-                  "  pm.response.to.have.status(200);",
-                  "  pm.expect(b.limit).to.eql(2);",
-                  "  pm.expect(b.items.length).to.be.at.most(2);",
-                  "});",
-                  "const seen = JSON.parse(pm.environment.get('pageSeen') || '[]').concat(b.items.map(i => i.id));",
-                  "pm.environment.set('pageSeen', JSON.stringify(seen));",
-                  "const pages = Number(pm.environment.get('pages') || 0) + 1;",
-                  "pm.environment.set('pages', pages);",
-                  "if (b.nextLink) {",
-                  "  pm.environment.set('nextLink', b.nextLink);",
-                  "  if (pm.info.requestName === 'next page') postman.setNextRequest('next page');",
-                  "} else {",
-                  "  pm.test('nextLink walked every item exactly once', () => {",
-                  "    pm.expect(b.total).to.eql(5);",
-                  "    pm.expect(pages).to.eql(3);",
-                  "    pm.expect(seen.length).to.eql(5);",
-                  "    pm.expect(new Set(seen).size).to.eql(5);",
-                  "  });",
+                  "// the first page; later ones follow nextLink (capped at 10 so a loop cannot hang the run)",
+                  "if (!pm.environment.get('pageUrl')) {",
+                  "  pm.environment.set('pageUrl', pm.variables.replaceIn('{{baseUrl}}/api/v1/decision-requests?q={{run}} page&limit=2'));",
                   "}"
                 ]
               }
