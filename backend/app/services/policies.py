@@ -10,13 +10,12 @@ from app.domain.errors import (
     AlreadyExists,
     InvalidInput,
     NotFoundError,
-    PlanFeatureRequired,
     PolicyAbovePlan,
     PolicyExceedsPlan,
     PolicyUnresolved,
 )
 from app.domain.risk import ACTION_TYPE, effective_risk
-from app.services import audit, features
+from app.services import audit, plans
 from app.services.validation import check_text
 
 RISKS = frozenset({"low", "medium", "high"})
@@ -193,8 +192,8 @@ def _validate(policy: dict[str, Any]) -> None:
 
 async def _check(session: AsyncSession, org: uuid.UUID, team: Any, policy: dict[str, Any]) -> None:
     _validate(policy)
-    if team is not None and not await features.is_enabled(session, org, TEAM_FLAG):
-        raise PlanFeatureRequired(TEAM_FLAG, "enterprise")
+    if team is not None:
+        await plans.require_flag(session, org, TEAM_FLAG)
     if (over := await _over_plan(session, org, policy)) is not None:
         raise over
 

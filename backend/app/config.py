@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     mcp_allowed_hosts: str = ""
     # `kid:secret,kid:secret`; the last signs, all verify. Hosted runs must set their own.
     receipt_keys: str = DEV_RECEIPT_KEYS
+    # Org admins may switch their own plan only in a demo deployment (spec 2).
+    demo_mode: bool = False
+    # Comma-separated emails; the only source of the platform-admin role (users.platform_admin is not read).
+    platform_admin_emails: str = ""
 
     @field_validator("database_url", "migrate_database_url", "worker_database_url")
     @classmethod

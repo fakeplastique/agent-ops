@@ -89,6 +89,10 @@ EXEMPT: set[str] = {
     "/api/v1/teams",  # same; a foreign parent_team_id is 404 (tests/api/test_teams.py)
     "/api/v1/me/tokens",  # the caller's own tokens: create and list take no foreign id
     "/api/v1/escalation-policies",  # same; a foreign team_id is 404 (tests/api/test_policies.py)
+    "/api/v1/organizations/current/plan",  # the caller's own organization, no id parameter
+    # Cross-tenant by design for platform admins; everyone else gets 403 before any id is read
+    # (tests/integration/test_flag_paths.py::test_platform_admin_only_from_env_allowlist).
+    "/api/v1/platform/organizations/{organization_id}/plan",
 }
 
 
