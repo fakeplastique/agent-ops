@@ -12,6 +12,7 @@ dependencies = [
   "arq>=0.28.0",
   "authlib>=1.9.1",
   "httpx2>=2.16.0",
+  "mcp>=2.3.0",
 ]
 
 [dependency-groups]
