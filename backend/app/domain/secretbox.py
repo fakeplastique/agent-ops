@@ -14,9 +14,8 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from app.domain.errors import InvalidInput
 
 _KID = re.compile(r"[A-Za-z0-9_-]{1,32}")
-NONCE = (
-    12  # 96-bit random nonce per seal; GCM's bound (~2^32 seals per key) is far off at this volume
-)
+# 96-bit random nonce per seal; GCM's bound (~2^32 seals per key) is far off at this volume.
+NONCE = 12
 
 
 @dataclass(frozen=True)
