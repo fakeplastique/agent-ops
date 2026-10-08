@@ -9,6 +9,7 @@ from mcp.client.streamable_http import streamable_http_client
 
 from app.api import deps
 from app.mcp.server import http_app
+from tests.conftest import TEST_REDIS
 
 BASE = "http://localhost"
 
@@ -39,7 +40,7 @@ async def mcp(app_engine, monkeypatch) -> AsyncIterator[Mcp]:
     """The MCP endpoint as main.py serves it, on the test database and Redis db 15 (write limits)."""
     from redis.asyncio import Redis
 
-    redis = Redis.from_url("redis://localhost:6379/15")
+    redis = Redis.from_url(TEST_REDIS)
     monkeypatch.setattr(deps, "_engine", app_engine)
     monkeypatch.setattr(deps, "_redis", redis)
     app = http_app()

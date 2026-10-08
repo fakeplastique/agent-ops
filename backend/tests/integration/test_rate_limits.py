@@ -12,6 +12,7 @@ from app.api.ratelimit import auth_failed, check_write
 from app.authz.principals import AgentPrincipal
 from app.config import settings
 from app.domain.errors import RateLimited, RateLimiterUnavailable
+from tests.conftest import TEST_REDIS
 
 from .helpers import FakeClock, utc
 
@@ -20,7 +21,7 @@ pytestmark = pytest.mark.anyio
 
 @pytest.fixture
 async def redis():
-    r = Redis.from_url("redis://localhost:6379/15")
+    r = Redis.from_url(TEST_REDIS)
     await r.flushdb()
     yield r
     await r.flushdb()

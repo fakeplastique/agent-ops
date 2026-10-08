@@ -20,6 +20,7 @@ from app.main import app
 from app.mcp import gating as mcp_gating
 from app.mcp.server import mcp as server
 from tests.api.harness import agent_auth, user_auth
+from tests.conftest import TEST_REDIS
 from tests.cross_tenant.harness import api_routes
 from tests.integration.web_harness import ORIGIN
 from tests.mcp.conftest import mcp  # noqa: F401 (the fixture)
@@ -94,7 +95,7 @@ async def probed(app_engine):
     register_error_handlers(probe)
     probe.include_router(api_v1_router)
     probe.include_router(router)
-    redis = Redis.from_url("redis://localhost:6379/15")
+    redis = Redis.from_url(TEST_REDIS)
     await redis.flushdb()
     probe.dependency_overrides[deps.get_engine] = lambda: app_engine
     probe.dependency_overrides[deps.get_redis] = lambda: redis

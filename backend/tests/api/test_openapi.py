@@ -15,6 +15,10 @@ TOKEN_ONCE = {
     ("post", "/api/v1/invitations"),
     ("post", "/api/v1/me/tokens"),
 }
+SECRET_ONCE = {  # webhook signing secrets: same rule as tokens
+    ("post", "/api/v1/webhook-subscriptions"),
+    ("post", "/api/v1/webhook-subscriptions/{subscription_id}/rotate-secret"),
+}
 SENSITIVE = re.compile(
     r"token|key|secret|hash|digest|ciphertext|password|prefix|salt|signature", re.IGNORECASE
 )
@@ -24,6 +28,11 @@ ALLOWED = {
     ("AgentToken", "token"),  # POST /agents/{id}/rotate: the replacement token, shown once
     ("InvitationCreated", "token"),  # POST /invitations: the invite link token, shown once
     ("PatCreated", "token"),  # POST /me/tokens: the new PAT, shown once
+    ("WebhookCreated", "secret"),  # POST /webhook-subscriptions: the signing secret, shown once
+    (
+        "WebhookSecret",
+        "secret",
+    ),  # POST /webhook-subscriptions/{id}/rotate-secret: the new one, once
     (
         "DecisionOut",
         "content_hash",
@@ -112,7 +121,7 @@ def test_openapi_and_docs_are_served_under_the_api_prefix():
 
 def test_no_response_schema_exposes_hash_secret_or_ciphertext_fields():
     spec = _spec()
-    with_token, seen = set(), set()
+    with_token, with_secret, seen = set(), set(), set()
     for method, path, op in _ops(spec):
         fields = _fields(spec, op)
         seen |= fields
@@ -120,7 +129,10 @@ def test_no_response_schema_exposes_hash_secret_or_ciphertext_fields():
         assert not leaked, (method, path, leaked)
         if any(f == "token" for _, f in fields):
             with_token.add((method, path))
+        if any(f == "secret" for _, f in fields):
+            with_secret.add((method, path))
     assert with_token == TOKEN_ONCE
+    assert with_secret == SECRET_ONCE
     assert ALLOWED <= seen, ALLOWED - seen  # a stale allowance would excuse a future leak
 
 

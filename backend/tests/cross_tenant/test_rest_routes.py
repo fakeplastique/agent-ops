@@ -9,6 +9,7 @@ from app.db.session import tenant_session
 from app.main import app
 from app.services.invitations import create_invitation
 from app.services.tokens import create_pat
+from app.services.webhooks import create_subscription
 from tests.api.harness import agent_auth
 from tests.integration.helpers import (
     LEVELS3,
@@ -45,10 +46,11 @@ BODIES = {
     },
     ("PATCH", "/api/v1/teams/{team_id}"): {"name": "x"},
     ("PATCH", "/api/v1/escalation-policies/{policy_id}"): {"quorum_size": 1},
+    ("PATCH", "/api/v1/webhook-subscriptions/{subscription_id}"): {"active": False},
 }
 PARAMS = {
     "organization_id", "invitation_id", "user_id", "decision_request_id", "step_id", "agent_id",
-    "team_id", "policy_id", "token_id",
+    "team_id", "policy_id", "token_id", "subscription_id",
 }  # fmt: skip
 
 
@@ -81,10 +83,13 @@ async def _tenant_a(owner, app_engine):
     async with tenant_session(app_engine, w.org) as s:
         pat, raw = await create_pat(s, w.org, admin, "a")
         invite, _ = await create_invitation(s, w.org, admin, "z@example.test", "member", None, NOW)
+        hook, _ = await create_subscription(
+            s, w.org, admin, "https://93.184.215.14/hook", ["decision.created"]
+        )
     ids = {
         "organization_id": w.org, "invitation_id": invite, "user_id": w.owner_user,
         "decision_request_id": escalated["id"], "step_id": step, "agent_id": w.identity,
-        "team_id": team, "policy_id": w.policy, "token_id": pat,
+        "team_id": team, "policy_id": w.policy, "token_id": pat, "subscription_id": hook["id"],
     }  # fmt: skip
     agent = await agent_auth(app_engine, w.org, w.identity)
     return ids, approved["id"], {"Authorization": f"Bearer {raw}"}, agent

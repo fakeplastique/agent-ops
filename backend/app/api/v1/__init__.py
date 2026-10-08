@@ -18,6 +18,7 @@ from app.api.v1 import (
     teams,
     tokens,
     votes,
+    webhooks,
 )
 
 api_v1_router = APIRouter(prefix="/api/v1")
@@ -38,5 +39,6 @@ api_v1_router.include_router(policies.router)
 api_v1_router.include_router(tokens.router)
 api_v1_router.include_router(plan.router)
 api_v1_router.include_router(platform.router)
+api_v1_router.include_router(webhooks.router)
 
 __all__ = ["api_v1_router"]
