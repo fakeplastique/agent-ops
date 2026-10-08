@@ -18,9 +18,12 @@ _KID = re.compile(r"[A-Za-z0-9_-]{1,32}")
 NONCE = 12
 
 
+class SealError(RuntimeError):
+    """A stored ciphertext that does not open: a key or data fault on our side, so a 500, never a 422."""
+
+
 @dataclass(frozen=True)
 class SecretBox:
-    spec: str
     keys: dict[str, bytes]
     current: str
 
@@ -33,12 +36,12 @@ class SecretBox:
                 key = base64.b64decode(b64, validate=True)
             except (binascii.Error, ValueError):
                 key = b""
-            if not _KID.fullmatch(kid) or len(key) != 32:
-                raise InvalidInput("each key is kid:base64 of 32 bytes")
+            if not _KID.fullmatch(kid) or len(key) != 32 or kid in keys:
+                raise InvalidInput("each key is a distinct kid:base64 of 32 bytes")
             keys[kid] = key
         if not keys:
             raise InvalidInput("at least one key is needed")
-        return cls(spec, keys, list(keys)[-1])
+        return cls(keys, list(keys)[-1])
 
     def seal(self, plaintext: str, aad: bytes) -> str:
         """`kid.base64url(nonce || ciphertext+tag)`; `aad` binds it to its row (a copied value will not open)."""
@@ -52,4 +55,4 @@ class SecretBox:
             raw = base64.urlsafe_b64decode(b64)
             return AESGCM(self.keys[kid]).decrypt(raw[:NONCE], raw[NONCE:], aad).decode()
         except (KeyError, InvalidTag, binascii.Error, ValueError) as e:
-            raise InvalidInput("the sealed secret does not open") from e
+            raise SealError("the sealed secret does not open") from e

@@ -9,7 +9,6 @@ from app.db.session import tenant_session
 from app.main import app
 from app.services.invitations import create_invitation
 from app.services.tokens import create_pat
-from app.services.webhook_security import system_resolve
 from app.services.webhooks import create_subscription
 from tests.api.harness import agent_auth
 from tests.integration.helpers import (
@@ -85,8 +84,8 @@ async def _tenant_a(owner, app_engine):
         pat, raw = await create_pat(s, w.org, admin, "a")
         invite, _ = await create_invitation(s, w.org, admin, "z@example.test", "member", None, NOW)
         hook, _ = await create_subscription(
-            s, w.org, admin, "https://93.184.215.14/hook", ["decision.created"], system_resolve
-        )  # an IP literal: no DNS in the probe
+            s, w.org, admin, "https://93.184.215.14/hook", ["decision.created"]
+        )
     ids = {
         "organization_id": w.org, "invitation_id": invite, "user_id": w.owner_user,
         "decision_request_id": escalated["id"], "step_id": step, "agent_id": w.identity,

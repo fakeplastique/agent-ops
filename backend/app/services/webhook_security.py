@@ -79,10 +79,9 @@ def check_url(url: str, *, allow_http: bool | None = None) -> Target:
     if len(url) > MAX_URL:
         raise WebhookUrlRefused("the URL is too long")
     # urlsplit silently drops tabs and newlines: refuse them (and any space or control) instead.
+    # A lone surrogate cannot be stored as UTF-8.
     if any(ord(c) <= 0x20 or ord(c) == 0x7F or 0xD800 <= ord(c) <= 0xDFFF for c in url):
-        raise WebhookUrlRefused(
-            "the URL is malformed"
-        )  # a lone surrogate cannot be stored as UTF-8
+        raise WebhookUrlRefused("the URL is malformed")
     try:
         parts = urlsplit(url)
         port = parts.port
@@ -102,6 +101,8 @@ def check_url(url: str, *, allow_http: bool | None = None) -> Target:
     ip: IP | None = None
     if parts.netloc.rsplit("@", 1)[-1].startswith("["):
         try:
+            if "%" in raw:  # a zone id makes the dial interface-scoped
+                raise ValueError(raw)
             ip = ipaddress.IPv6Address(raw)
         except ValueError as e:
             raise WebhookUrlRefused("the host is not a valid name") from e

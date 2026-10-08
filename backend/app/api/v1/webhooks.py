@@ -10,7 +10,7 @@ from app.api.pagination import Page, PaginationParams, paginate
 from app.api.schemas.base import BaseSchema
 from app.db.session import tenant_session
 from app.services import webhooks
-from app.services.webhook_security import Resolver, system_resolve
+from app.services.webhook_security import Resolver, system_resolve, validate_url
 
 # Webhook config is admin data (a URL can carry the receiver's own token): reads are org_admin only too.
 router = APIRouter(prefix="/webhook-subscriptions", tags=["webhooks"])
@@ -58,9 +58,11 @@ class WebhookSecret(BaseModel):
 async def create(
     body: WebhookIn, response: Response, admin: AdminDep, engine: EngineDep, resolver: ResolverDep
 ) -> WebhookCreated:
+    # DNS runs before the session: a slow resolver must not hold a pooled transaction open.
+    url = await validate_url(body.url, resolver=resolver)
     async with tenant_session(engine, admin.organization_id) as s:
         row, secret = await webhooks.create_subscription(
-            s, admin.organization_id, admin.user_id, body.url, body.events, resolver
+            s, admin.organization_id, admin.user_id, url, body.events
         )
     response.headers["Location"] = f"/api/v1/webhook-subscriptions/{row['id']}"
     return WebhookCreated(**row, secret=secret)
@@ -94,10 +96,12 @@ async def update(
     resolver: ResolverDep,
 ) -> WebhookOut:  # fmt: skip
     fields = body.model_dump(exclude_unset=True)  # only what was sent; an explicit null is refused
+    if fields.get("url") is not None:  # same guard as create, before the session
+        fields["url"] = await validate_url(fields["url"], resolver=resolver)
     async with tenant_session(engine, admin.organization_id) as s:
         return WebhookOut(
             **await webhooks.update_subscription(
-                s, admin.organization_id, admin.user_id, subscription_id, fields, resolver
+                s, admin.organization_id, admin.user_id, subscription_id, fields
             )
         )
 

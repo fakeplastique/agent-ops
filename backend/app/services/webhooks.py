@@ -1,4 +1,4 @@
-"""Webhook subscriptions (S27): the URL passes the SSRF guard on every save, the secret is sealed at rest.
+"""Webhook subscriptions (S27): the secret is sealed at rest; URLs arrive already through validate_url.
 
 The plaintext secret leaves only in the create and rotate replies; nothing here logs or audits it."""
 
@@ -13,7 +13,6 @@ from app.config import settings
 from app.domain.errors import InvalidInput, NotFoundError
 from app.domain.secretbox import SecretBox
 from app.services import audit, webhook_security
-from app.services.webhook_security import Resolver
 
 # What a subscriber can select: every type the engine emits (a test greps the emits against this set).
 EVENT_TYPES = frozenset({
@@ -69,12 +68,10 @@ def _events(events: Any) -> list[str]:
 
 
 async def create_subscription(
-    s: AsyncSession, org: uuid.UUID, actor: uuid.UUID, url: str, events: Iterable[str],
-    resolver: Resolver,
-) -> tuple[dict, str]:  # fmt: skip
-    """The new subscription and its secret (shown once)."""
+    s: AsyncSession, org: uuid.UUID, actor: uuid.UUID, url: str, events: Iterable[str]
+) -> tuple[dict, str]:
+    """The new subscription and its secret (shown once). `url` is validate_url's output."""
     events = _events(events)
-    url = await webhook_security.validate_url(url, resolver=resolver)
     # Serialise creates per org: two cannot both count below the cap.
     await s.execute(_LOCK, {"k": f"webhook_subscriptions:{org}"})
     if (await s.execute(_COUNT, {"o": org})).scalar_one() >= MAX_SUBSCRIPTIONS:
@@ -104,15 +101,12 @@ async def get_subscription(s: AsyncSession, org: uuid.UUID, sub: uuid.UUID) -> d
 
 
 async def update_subscription(
-    s: AsyncSession, org: uuid.UUID, actor: uuid.UUID, sub: uuid.UUID, fields: dict[str, Any],
-    resolver: Resolver,
-) -> dict:  # fmt: skip
-    """`fields` holds only what the caller sent; a new URL passes the same guard as at create."""
+    s: AsyncSession, org: uuid.UUID, actor: uuid.UUID, sub: uuid.UUID, fields: dict[str, Any]
+) -> dict:
+    """`fields` holds only what the caller sent; a new `url` is validate_url's output."""
     if any(v is None for v in fields.values()):
         raise InvalidInput("url, events and active cannot be null")
     url = fields.get("url")
-    if url is not None:
-        url = await webhook_security.validate_url(url, resolver=resolver)
     events = _events(fields["events"]) if "events" in fields else None
     active = fields.get("active")
     if active is not None and not isinstance(active, bool):

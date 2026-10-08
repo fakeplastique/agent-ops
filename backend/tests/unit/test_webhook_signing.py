@@ -7,7 +7,7 @@ import pytest
 
 from app.config import DEV_WEBHOOK_SECRET_KEYS, Settings
 from app.domain.errors import InvalidInput
-from app.domain.secretbox import SecretBox
+from app.domain.secretbox import SealError, SecretBox
 from app.services import webhook_security as ws
 
 # The official vectors: standard-webhooks/libraries/python/tests/test_webhooks.py (test_sign_function,
@@ -64,21 +64,34 @@ def test_secretbox_is_aes_gcm_bound_to_its_row_and_survives_key_rotation():
     assert sealed.startswith("k1.") and "whsec_x" not in sealed
     assert old.seal("whsec_x", b"org:sub") != sealed  # a fresh nonce every time
     assert old.open(sealed, b"org:sub") == "whsec_x"
-    with pytest.raises(InvalidInput):
+    with pytest.raises(SealError):  # a server fault, never the caller's 422
         old.open(sealed, b"org:other-sub")  # ciphertext copied onto another row does not open
     raw = bytearray(base64.urlsafe_b64decode(sealed[3:]))
     raw[-1] ^= 1
-    with pytest.raises(InvalidInput):
+    with pytest.raises(SealError):
         old.open("k1." + base64.urlsafe_b64encode(bytes(raw)).decode(), b"org:sub")
     # rotation: the last key seals, older ones still open
-    rotated = SecretBox.parse(f"{old.spec},k2:{base64.b64encode(os.urandom(32)).decode()}")
+    rotated = SecretBox.parse(
+        f"k1:{base64.b64encode(old.keys['k1']).decode()},k2:{base64.b64encode(os.urandom(32)).decode()}"
+    )
     assert rotated.open(sealed, b"org:sub") == "whsec_x"
     assert rotated.seal("whsec_y", b"a").startswith("k2.")
-    with pytest.raises(InvalidInput):
+    with pytest.raises(SealError):
         _box("k1").open(sealed, b"org:sub")  # same kid, different key
 
 
-@pytest.mark.parametrize("spec", ["", "k1", "k1:", "k1:c2hvcnQ=", "bad kid:" + "A" * 44, "k1:!!!"])
+@pytest.mark.parametrize(
+    "spec",
+    [
+        "",
+        "k1",
+        "k1:",
+        "k1:c2hvcnQ=",
+        "bad kid:" + "A" * 44,
+        "k1:!!!",
+        f"k1:{'A' * 43}=,k1:{'B' * 43}=",
+    ],
+)  # the last: a repeated kid would silently swap which key seals
 def test_secretbox_refuses_unusable_keys(spec):
     with pytest.raises(InvalidInput):
         SecretBox.parse(spec)

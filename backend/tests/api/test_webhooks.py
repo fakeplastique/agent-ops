@@ -12,7 +12,7 @@ from app.api.v1 import webhooks as api
 from app.config import settings
 from app.db.session import tenant_session
 from app.domain.errors import InvalidInput
-from app.domain.secretbox import SecretBox
+from app.domain.secretbox import SealError, SecretBox
 from app.main import app
 from app.services import webhook_security as ws
 from app.services import webhooks
@@ -158,7 +158,7 @@ async def test_secret_returned_once_stored_as_aes_gcm_ciphertext_and_absent_from
     box = SecretBox.parse(settings.webhook_secret_keys)
     assert stored.startswith(f"{box.current}.")
     assert box.open(stored, f"webhook_subscription:{w.org}:{sub}".encode()) == secret
-    with pytest.raises(ValueError):
+    with pytest.raises(SealError):
         box.open(stored, f"webhook_subscription:{w.org}:{w.policy}".encode())
     async with tenant_session(app_engine, w.org) as s:
         assert await webhooks.load_secret(s, w.org, sub) == secret  # what delivery (S28) signs with
@@ -222,19 +222,12 @@ async def test_two_concurrent_creates_cannot_both_pass_the_cap(
     monkeypatch.setattr(webhooks, "MAX_SUBSCRIPTIONS", 1)
     w = await make_world(owner_engine)
 
-    async def resolve(host: str, port: int) -> list[str]:
-        return [PUBLIC]
-
     async def create():
         async with tenant_session(app_engine, w.org) as s:
-            await webhooks.create_subscription(
-                s, w.org, w.owner_user, BODY["url"], BODY["events"], resolve
-            )
+            await webhooks.create_subscription(s, w.org, w.owner_user, BODY["url"], BODY["events"])
 
     async with tenant_session(app_engine, w.org) as s1:
-        await webhooks.create_subscription(
-            s1, w.org, w.owner_user, BODY["url"], BODY["events"], resolve
-        )
+        await webhooks.create_subscription(s1, w.org, w.owner_user, BODY["url"], BODY["events"])
         second = asyncio.create_task(create())
         await asyncio.sleep(0.5)  # the second create counts while the first is still uncommitted
     with pytest.raises(InvalidInput):
@@ -243,3 +236,24 @@ async def test_two_concurrent_creates_cannot_both_pass_the_cap(
         owner_engine, "select count(*) from webhook_subscriptions where organization_id=:o", o=w.org
     )
     assert rows == [(1,)]
+
+
+async def test_dns_is_resolved_before_any_transaction_opens(web, app_engine, owner_engine):
+    # catches: a slow resolver holding a DB connection and transaction open (up to the DNS timeout)
+    seen: list[int] = []
+
+    async def resolve(host: str, port: int) -> list[str]:
+        [(n,)] = await fetch(
+            owner_engine,
+            "select count(*) from pg_stat_activity"
+            " where usename = 'app_rt' and state like 'idle in transaction%'",
+        )
+        seen.append(n)
+        return [PUBLIC]
+
+    app.dependency_overrides[api.get_resolver] = lambda: resolve
+    _, admin = await _admin(app_engine, owner_engine)
+    sub = (await web.client.post(WH, json=BODY, headers=admin)).json()
+    r = await web.client.patch(f"{WH}/{sub['id']}", json={"url": BODY["url"]}, headers=admin)
+    assert r.status_code == 200, r.text
+    assert seen == [0, 0]

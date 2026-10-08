@@ -84,6 +84,10 @@ BLOCKED = [
     ("https://[2002:7f00:1::]/h", PRIVATE),  # 6to4 of 127.0.0.1
     ("https://[2002:a00:1::]/h", PRIVATE),  # 6to4 of 10.0.0.1
     ("https://[2001:0:4136:e378:8000:63bf:80ff:fffe]/h", PRIVATE),  # Teredo, client 127.0.0.1
+    (
+        "https://[2001:4860:4860::8888%25x]/h",
+        "the host is not a valid name",
+    ),  # zone id: a scoped dial
     ("https://localhost/h", INTERNAL),
     ("https://LOCALHOST./h", INTERNAL),
     ("https://api.localhost/h", INTERNAL),
