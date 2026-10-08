@@ -15,6 +15,8 @@ from app.db.migrate import upgrade
 
 ROLES_SQL = Path(__file__).parents[2] / "scripts" / "db_roles.sql"
 TEST_DB = os.environ.get("TEST_DB_NAME", "agent_ops_test")  # a parallel session can use its own
+# Tests flush this database: a parallel session must pick another one, or each wipes the other.
+TEST_REDIS = os.environ.get("TEST_REDIS_URL", "redis://localhost:6379/15")
 
 
 def _urls() -> tuple[URL, URL]:
@@ -121,7 +123,7 @@ async def web(app_engine: AsyncEngine, monkeypatch: pytest.MonkeyPatch):
     )
 
     fake, clock = FakeIssuer(), Tick(utc(2026, 1, 15, 10, 0))
-    redis = Redis.from_url("redis://localhost:6379/15")
+    redis = Redis.from_url(TEST_REDIS)
     await redis.flushdb()
     monkeypatch.setattr(settings, "web_origin", ORIGIN)
     monkeypatch.setattr(settings, "oidc_issuer", ISSUER)

@@ -15,13 +15,14 @@ from app.mcp.server import mcp as server
 from app.services import cache, invitations, members, plans, policies, teams
 from app.services.features import is_enabled
 from tests.api.harness import user_auth
+from tests.conftest import TEST_REDIS
 from tests.mcp.conftest import mcp  # noqa: F401 (the fixture)
 
 from .helpers import FakeClock, make_org, make_policy, make_team, staff, utc
 
 pytestmark = pytest.mark.anyio
 
-URL = "redis://localhost:6379/15"
+URL = TEST_REDIS
 PLAN = "/api/v1/organizations/current/plan"
 LEVELS = [{"role": "manager", "timeout_minutes": 60}]
 POLICY = {"name": "default", "quorum_size": 3, "require_distinct_agents": True, "rounds": 1,

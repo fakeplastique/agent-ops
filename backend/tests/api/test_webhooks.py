@@ -246,7 +246,8 @@ async def test_dns_is_resolved_before_any_transaction_opens(web, app_engine, own
         [(n,)] = await fetch(
             owner_engine,
             "select count(*) from pg_stat_activity"
-            " where usename = 'app_rt' and state like 'idle in transaction%'",
+            " where usename = 'app_rt' and datname = current_database()"
+            " and state like 'idle in transaction%'",
         )
         seen.append(n)
         return [PUBLIC]
