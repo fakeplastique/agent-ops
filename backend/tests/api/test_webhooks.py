@@ -1,5 +1,6 @@
 """Webhook subscriptions over REST (S27): org_admin only, SSRF-checked URLs, secret shown once (I13, FM20, FM21)."""
 
+import asyncio
 import base64
 import logging
 import re
@@ -10,6 +11,7 @@ import pytest
 from app.api.v1 import webhooks as api
 from app.config import settings
 from app.db.session import tenant_session
+from app.domain.errors import InvalidInput
 from app.domain.secretbox import SecretBox
 from app.main import app
 from app.services import webhook_security as ws
@@ -212,3 +214,32 @@ def test_every_emitted_event_type_can_be_subscribed():
     src = "\n".join(p.read_text() for p in Path(webhooks.__file__).parent.rglob("*.py"))
     emitted = set(re.findall(r'outbox\.emit\(\s*\w+,\s*\w+,\s*"([a-z_]+\.[a-z_]+)"', src))
     assert emitted and emitted <= webhooks.EVENT_TYPES, emitted - webhooks.EVENT_TYPES
+
+
+async def test_two_concurrent_creates_cannot_both_pass_the_cap(
+    app_engine, owner_engine, monkeypatch
+):
+    monkeypatch.setattr(webhooks, "MAX_SUBSCRIPTIONS", 1)
+    w = await make_world(owner_engine)
+
+    async def resolve(host: str, port: int) -> list[str]:
+        return [PUBLIC]
+
+    async def create():
+        async with tenant_session(app_engine, w.org) as s:
+            await webhooks.create_subscription(
+                s, w.org, w.owner_user, BODY["url"], BODY["events"], resolve
+            )
+
+    async with tenant_session(app_engine, w.org) as s1:
+        await webhooks.create_subscription(
+            s1, w.org, w.owner_user, BODY["url"], BODY["events"], resolve
+        )
+        second = asyncio.create_task(create())
+        await asyncio.sleep(0.5)  # the second create counts while the first is still uncommitted
+    with pytest.raises(InvalidInput):
+        await second  # catches: read-then-write cap check letting both through
+    rows = await fetch(
+        owner_engine, "select count(*) from webhook_subscriptions where organization_id=:o", o=w.org
+    )
+    assert rows == [(1,)]

@@ -75,9 +75,8 @@ async def create_subscription(
     """The new subscription and its secret (shown once)."""
     events = _events(events)
     url = await webhook_security.validate_url(url, resolver=resolver)
-    await s.execute(
-        _LOCK, {"k": f"webhook_subscriptions:{org}"}
-    )  # two creates cannot both pass the cap
+    # Serialise creates per org: two cannot both count below the cap.
+    await s.execute(_LOCK, {"k": f"webhook_subscriptions:{org}"})
     if (await s.execute(_COUNT, {"o": org})).scalar_one() >= MAX_SUBSCRIPTIONS:
         raise InvalidInput(f"an organization has at most {MAX_SUBSCRIPTIONS} webhook subscriptions")
     sub = uuid.uuid4()
