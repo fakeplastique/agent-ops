@@ -1,6 +1,7 @@
 """S26 / I15: cached flags and policy resolution, invalidated on every write, keyed by tenant, failing open."""
 
 import asyncio
+import time
 import uuid
 
 import pytest
@@ -34,11 +35,12 @@ async def cached():
     store = RedisCache(URL)
     await store.redis.flushdb()
     cache.configure(store)
+    cache.reset()
     for c in (cache.HITS, cache.MISSES, cache.ERRORS):
         c.clear()
     yield store
     cache.configure(None)
-    cache.BYPASS.clear()
+    cache.reset()
     await store.redis.flushdb()
     await store.redis.aclose()
 
@@ -230,7 +232,7 @@ async def test_redis_down_falls_through_to_db_not_to_error(web, app_engine, owne
         assert cache.ERRORS["flags"] >= 1  # an outage is visible, not silent
     finally:
         cache.configure(None)
-        cache.BYPASS.clear()
+        cache.reset()
         await dead.redis.aclose()
 
 
@@ -293,3 +295,85 @@ async def test_a_session_of_another_tenant_never_reads_the_cache(cached, app_eng
     assert await _flag(app_engine, a) is True  # warm A
     async with tenant_session(app_engine, b) as s:
         assert await is_enabled(s, a, "analytics") is False  # catches: the cache as a way round RLS
+
+
+async def test_cancelled_after_commit_this_process_reads_the_db_and_the_bump_still_lands(
+    cached, app_engine, owner_engine, monkeypatch
+):
+    # A client disconnect cancels the request between COMMIT and the stamp write (CancelledError).
+    org = await make_org(owner_engine, "pro")
+    admin = await staff(owner_engine, org, "org_admin")
+    assert await _flag(app_engine, org) is True  # warm Pro
+    stamp = await cached.stamp(org)
+    entered, release = asyncio.Event(), asyncio.Event()
+    real = cached.bump
+
+    async def slow(o):
+        entered.set()
+        await release.wait()
+        await real(o)
+
+    monkeypatch.setattr(cached, "bump", slow)
+
+    async def downgrade():
+        async with tenant_session(app_engine, org) as s:
+            await plans.change_plan(s, org, "free", admin, "platform")
+
+    task = asyncio.create_task(downgrade())
+    await entered.wait()  # committed, bump in flight
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert (
+        await _flag(app_engine, org) is False
+    )  # catches: this process serving Pro after the downgrade
+    release.set()
+    await asyncio.gather(*cache.IN_FLIGHT)
+    assert (
+        await cached.stamp(org) != stamp
+    )  # catches: the cancellation dropping the bump for others
+    assert org not in cache.BYPASS and await _flag(app_engine, org) is False  # back on the cache
+
+
+async def test_breaker_skips_redis_after_an_error_and_retries_after_the_pause(
+    app_engine, owner_engine, monkeypatch
+):
+    dead = RedisCache(
+        "redis://10.255.255.1:6379/15"
+    )  # unroutable: every call waits out the timeout
+    cache.configure(dead)
+    try:
+        org = await make_org(owner_engine, "pro")
+        start = time.monotonic()
+        async with tenant_session(app_engine, org) as s:
+            got = await plans.read_plan(s, org, FakeClock(utc(2026, 1, 1)))
+        took = time.monotonic() - start
+        assert "analytics" in got["flags"]
+        # catches: every flag paying the timeout (6 flags x 250 ms) instead of only the first
+        assert cache.ERRORS["flags"] == 1 and took < 2 * cache.REDIS_TIMEOUT + 0.3, took
+        now = time.monotonic()
+        monkeypatch.setattr(cache, "monotonic", lambda: now + cache.BREAK + 1)  # half-open
+        assert await _flag(app_engine, org) is True
+        assert cache.ERRORS["flags"] == 2  # it tried Redis again
+    finally:
+        cache.configure(None)
+        cache.reset()
+        await dead.redis.aclose()
+
+
+def test_redis_client_never_retries():
+    # The 250 ms bound holds only if redis-py does not retry (its default changed across versions).
+    kwargs = RedisCache(URL).redis.connection_pool.connection_kwargs
+    assert kwargs["retry"]._retries == 0 and kwargs["socket_timeout"] == cache.REDIS_TIMEOUT
+
+
+async def test_a_hit_and_a_miss_return_the_same_types(cached):
+    org = uuid.uuid4()
+
+    async def load():
+        return {"pair": (1, 2), "n": 1.5}
+
+    miss = await cache.get_or_load(None, org, "probe", "t", load)
+    hit = await cache.get_or_load(None, org, "probe", "t", load)
+    assert cache.HITS["probe"] == 1
+    assert miss == hit == {"pair": [1, 2], "n": 1.5}  # catches: a tuple on miss, a list on hit

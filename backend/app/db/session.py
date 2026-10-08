@@ -27,7 +27,7 @@ async def lookup_as(conn: AsyncConnection, key: str, value: str) -> None:
 async def tenant_session(engine: AsyncEngine, org_id: uuid.UUID) -> AsyncIterator[AsyncSession]:
     """One transaction scoped to a tenant; commits on exit, rolls back on error.
 
-    Hooks in `session.info["after_commit"]` run once the commit has succeeded (cache invalidation)."""
+    Hooks in `session.info["after_commit"]` (sync, returning an awaitable or None) run after the commit."""
     async with AsyncSession(engine, expire_on_commit=False) as session:
         async with session.begin():
             # is_local=true: the setting dies with the transaction, so pooled connections never leak it.
@@ -36,5 +36,8 @@ async def tenant_session(engine: AsyncEngine, org_id: uuid.UUID) -> AsyncIterato
             )
             session.info["organization_id"] = org_id  # what the cache may serve this session
             yield session
-        for hook in session.info.pop("after_commit", ()):
-            await hook()
+        # Every hook starts before the first await, so a cancellation cannot skip one.
+        started = [hook() for hook in session.info.pop("after_commit", ())]
+        for pending in started:
+            if pending is not None:
+                await pending

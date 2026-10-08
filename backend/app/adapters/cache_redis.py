@@ -1,8 +1,10 @@
 import uuid
 
 from redis.asyncio import Redis
+from redis.asyncio.retry import Retry
+from redis.backoff import NoBackoff
 
-TIMEOUT = 0.25  # seconds: an unreachable cache costs a moment, then the database answers
+from app.services.cache import REDIS_TIMEOUT
 
 
 class RedisCache:
@@ -10,8 +12,13 @@ class RedisCache:
     cannot equal an older stamp, so entries written under that one stay unreachable."""
 
     def __init__(self, url: str) -> None:
+        # No retries: the timeout is the whole cost of an unreachable cache, whatever redis-py defaults to.
         self.redis = Redis.from_url(
-            url, socket_timeout=TIMEOUT, socket_connect_timeout=TIMEOUT, decode_responses=True
+            url,
+            socket_timeout=REDIS_TIMEOUT,
+            socket_connect_timeout=REDIS_TIMEOUT,
+            retry=Retry(NoBackoff(), 0),
+            decode_responses=True,
         )
 
     async def stamp(self, org: uuid.UUID) -> str:
