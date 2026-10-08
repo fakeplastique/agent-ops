@@ -61,6 +61,20 @@ ROUTES: dict[tuple[str, str], str] = {
     ("DELETE", "/api/v1/escalation-policies/{policy_id}"): "tenant B deletes tenant A's policy",
     ("GET", "/api/v1/me/tokens/{token_id}"): "tenant B reads tenant A's personal token",
     ("DELETE", "/api/v1/me/tokens/{token_id}"): "tenant B revokes tenant A's personal token",
+    # S27, probed with every principal by tests/cross_tenant/test_rest_routes.py.
+    ("GET", "/api/v1/webhook-subscriptions/{subscription_id}"): "tenant B reads tenant A's webhook",
+    (
+        "PATCH",
+        "/api/v1/webhook-subscriptions/{subscription_id}",
+    ): "tenant B repoints or mutes tenant A's webhook",
+    (
+        "DELETE",
+        "/api/v1/webhook-subscriptions/{subscription_id}",
+    ): "tenant B deletes tenant A's webhook",
+    (
+        "POST",
+        "/api/v1/webhook-subscriptions/{subscription_id}/rotate-secret",
+    ): "tenant B mints a signing secret for tenant A's webhook",
 }
 
 # Routes that carry no tenant data.
@@ -91,6 +105,7 @@ EXEMPT: set[str] = {
     "/api/v1/me/tokens",  # the caller's own tokens: create and list take no foreign id
     "/api/v1/escalation-policies",  # same; a foreign team_id is 404 (tests/api/test_policies.py)
     "/api/v1/organizations/current/plan",  # the caller's own organization, no id parameter
+    "/api/v1/webhook-subscriptions",  # create and list: the tenant comes from the caller
     # Cross-tenant by design for platform admins; everyone else gets 403 before any id is read
     # (tests/integration/test_flag_paths.py::test_platform_admin_only_from_env_allowlist).
     "/api/v1/platform/organizations/{organization_id}/plan",
