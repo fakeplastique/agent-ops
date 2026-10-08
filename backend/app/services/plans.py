@@ -9,7 +9,7 @@ from app.authz.matrix import Action, can
 from app.authz.principals import Principal, UserPrincipal
 from app.domain.errors import Forbidden, NotFoundError, PlanFeatureRequired
 from app.ports.clock import Clock
-from app.services import audit, features, outbox
+from app.services import audit, cache, features, outbox
 
 PLANS = (
     "free",
@@ -68,12 +68,13 @@ async def change_plan(
 ) -> None:
     """Set the plan in this tenant's transaction, with its audit row and plan.changed event.
 
-    Flags are read live on every request (no cache until S26), so the next request sees the new plan."""
+    Cached flags are invalidated after the commit, so the next request sees the new plan."""
     old = await session.scalar(_SET, {"o": organization_id, "p": plan})
     if old is None:
         raise NotFoundError
     if old == plan:
         return
+    cache.invalidate(session, organization_id)
     change: dict[str, Any] = {"from": old, "to": plan}
     # A platform admin is no member of this tenant: its trail names no foreign user as actor.
     if via == "platform":

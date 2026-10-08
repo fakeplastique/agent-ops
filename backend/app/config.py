@@ -33,6 +33,8 @@ class Settings(BaseSettings):
     demo_mode: bool = False
     # Comma-separated emails; the only source of the platform-admin role (users.platform_admin is not read).
     platform_admin_emails: str = ""
+    # Shared secret a scraper sends as X-Metrics-Token to read GET /metrics; empty = no metrics route.
+    metrics_token: str = ""
 
     @field_validator("database_url", "migrate_database_url", "worker_database_url")
     @classmethod

@@ -67,6 +67,7 @@ ROUTES: dict[tuple[str, str], str] = {
 EXEMPT: set[str] = {
     "/healthz",
     "/readyz",
+    "/metrics",  # process-wide counters by cache name, behind METRICS_TOKEN; no tenant id in or out
     # Auth routes carry no tenant data: they resolve a login, a session, or switch the caller's own organization.
     "/api/v1/auth/login",
     "/api/v1/auth/callback",

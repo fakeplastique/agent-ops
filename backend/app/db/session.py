@@ -25,10 +25,15 @@ async def lookup_as(conn: AsyncConnection, key: str, value: str) -> None:
 
 @asynccontextmanager
 async def tenant_session(engine: AsyncEngine, org_id: uuid.UUID) -> AsyncIterator[AsyncSession]:
-    """One transaction scoped to a tenant; commits on exit, rolls back on error."""
-    async with AsyncSession(engine, expire_on_commit=False) as session, session.begin():
-        # is_local=true: the setting dies with the transaction, so pooled connections never leak it.
-        await session.execute(
-            text("select set_config('app.organization_id', :o, true)"), {"o": str(org_id)}
-        )
-        yield session
+    """One transaction scoped to a tenant; commits on exit, rolls back on error.
+
+    Hooks in `session.info["after_commit"]` run once the commit has succeeded (cache invalidation)."""
+    async with AsyncSession(engine, expire_on_commit=False) as session:
+        async with session.begin():
+            # is_local=true: the setting dies with the transaction, so pooled connections never leak it.
+            await session.execute(
+                text("select set_config('app.organization_id', :o, true)"), {"o": str(org_id)}
+            )
+            yield session
+        for hook in session.info.pop("after_commit", ()):
+            await hook()
