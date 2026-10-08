@@ -186,14 +186,18 @@ async def post_pinned(
     timeout: float = TIMEOUT,
 ) -> int:  # fmt: skip
     """Delivery (S28): re-check the URL, pin DNS, POST once, return the status. The body is never read.
+    Raises WebhookUrlRefused, TimeoutError (total `timeout` after DNS) or an httpx2 transport error.
 
     A 3xx is refused, never followed: the Location is attacker-chosen and was never checked."""
     target = check_url(url, allow_http=allow_http)
     transport = PinnedTransport(await pin(target, resolver), backend)
+    # One deadline for the whole call (a trickling receiver beats per-read timeouts); trust_env off,
+    # else an env proxy is mounted over the pinned transport and resolves the name itself.
     async with (
+        asyncio.timeout(timeout),
         httpx2.AsyncClient(
             transport=transport, follow_redirects=False, timeout=timeout, trust_env=False
-        ) as client,  # trust_env off: an env proxy would be mounted over the pinned transport
+        ) as client,
         client.stream("POST", target.url, content=body, headers=dict(headers)) as response,
     ):
         status = response.status_code

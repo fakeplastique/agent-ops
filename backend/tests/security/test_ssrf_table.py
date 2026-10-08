@@ -243,3 +243,30 @@ def test_https_pins_sni_and_certificate_to_the_hostname():
     # The pinned transport changes only where the socket goes; TLS still checks the URL's name.
     t = ws.PinnedTransport(PUBLIC)
     assert t._pool._ssl_context.check_hostname is True  # type: ignore[attr-defined]
+
+
+async def test_a_trickling_receiver_is_cut_at_the_total_deadline():
+    # Per-read timeouts never fire if each byte arrives in time: the whole call needs one deadline.
+    async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        await reader.readuntil(b"\r\n\r\n")
+        try:
+            writer.write(b"HTTP/1.1 200 OK\r\n")
+            for _ in range(100):
+                writer.write(b"X-Slow: 1\r\n")
+                await writer.drain()
+                await asyncio.sleep(0.05)
+        except ConnectionError:
+            pass  # the client hung up at its deadline: what this test wants
+        writer.close()
+
+    server = await asyncio.start_server(handle, "127.0.0.1", 0)
+    backend = Recording(AutoBackend(), to=("127.0.0.1", server.sockets[0].getsockname()[1]))
+    loop = asyncio.get_running_loop()
+    async with server:
+        start = loop.time()
+        with pytest.raises(TimeoutError):
+            await ws.post_pinned(
+                "http://hooks.example.com:8080/h", b"{}", {}, allow_http=True,
+                resolver=resolver([PUBLIC]), backend=backend, timeout=0.3,
+            )  # fmt: skip
+        assert loop.time() - start < 1.5
