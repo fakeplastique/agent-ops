@@ -104,6 +104,20 @@ def test_settings_refuse_the_dev_webhook_key_on_railway(monkeypatch):
         Settings()
     monkeypatch.setenv("WEBHOOK_SECRET_KEYS", "k:" + base64.b64encode(os.urandom(32)).decode())
     assert Settings().webhook_secret_keys != DEV_WEBHOOK_SECRET_KEYS
+    dev_b64 = DEV_WEBHOOK_SECRET_KEYS.split(":", 1)[1]
+    for disguised in (
+        DEV_WEBHOOK_SECRET_KEYS + ",",
+        " " + DEV_WEBHOOK_SECRET_KEYS,
+        f"prod:{dev_b64}",
+    ):
+        monkeypatch.setenv("WEBHOOK_SECRET_KEYS", disguised)
+        with pytest.raises(ValueError, match="WEBHOOK_SECRET_KEYS"):
+            Settings()  # catches: the public dev key booting under another spelling
     monkeypatch.setenv("WEBHOOK_SECRET_KEYS", "k:short")
     with pytest.raises(ValueError):
         Settings()
+
+
+def test_secretbox_repr_does_not_leak_key_bytes():
+    box = _box("k1")
+    assert repr(box.keys["k1"]) not in repr(box) and "k1" in repr(box)

@@ -56,11 +56,10 @@ class Settings(BaseSettings):
             raise ValueError(
                 "RECEIPT_KEYS must be set on Railway: the dev key makes receipts forgeable"
             )
-        SecretBox.parse(self.webhook_secret_keys)
-        if (
-            os.environ.get("RAILWAY_ENVIRONMENT")
-            and self.webhook_secret_keys == DEV_WEBHOOK_SECRET_KEYS
-        ):
+        # By key bytes, not spelling: a renamed kid or a stray comma still carries the public key.
+        dev_key = SecretBox.parse(DEV_WEBHOOK_SECRET_KEYS).keys["dev"]
+        ring = SecretBox.parse(self.webhook_secret_keys).keys.values()
+        if os.environ.get("RAILWAY_ENVIRONMENT") and dev_key in ring:
             raise ValueError(
                 "WEBHOOK_SECRET_KEYS must be set on Railway: the dev key is public in git"
             )

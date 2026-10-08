@@ -213,7 +213,7 @@ def test_every_emitted_event_type_can_be_subscribed():
     # catches: a new outbox event no subscriber can select (the filter list drifting from the engine)
     src = "\n".join(p.read_text() for p in Path(webhooks.__file__).parent.rglob("*.py"))
     emitted = set(re.findall(r'outbox\.emit\(\s*\w+,\s*\w+,\s*"([a-z_]+\.[a-z_]+)"', src))
-    assert emitted and emitted <= webhooks.EVENT_TYPES, emitted - webhooks.EVENT_TYPES
+    assert emitted == webhooks.EVENT_TYPES, emitted ^ webhooks.EVENT_TYPES  # and none stale
 
 
 async def test_two_concurrent_creates_cannot_both_pass_the_cap(

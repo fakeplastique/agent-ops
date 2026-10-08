@@ -6,7 +6,7 @@ import base64
 import binascii
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -24,7 +24,7 @@ class SealError(RuntimeError):
 
 @dataclass(frozen=True)
 class SecretBox:
-    keys: dict[str, bytes]
+    keys: dict[str, bytes] = field(repr=False)  # a traceback must not print key bytes
     current: str
 
     @classmethod

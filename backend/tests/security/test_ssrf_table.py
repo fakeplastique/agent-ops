@@ -1,6 +1,8 @@
 """FM20 / I17: a webhook URL can never make the server connect to a non-public address."""
 
 import asyncio
+import socket
+import threading
 
 import httpcore2
 import pytest
@@ -88,7 +90,12 @@ BLOCKED = [
         "https://[2001:4860:4860::8888%25x]/h",
         "the host is not a valid name",
     ),  # zone id: a scoped dial
+    ("https://[::ffff:0:7f00:1]/h", PRIVATE),  # IPv4-translated 127.0.0.1 (SIIT)
+    ("https://[5f00::1]/h", PRIVATE),  # SRv6 SID space, never a public host
     ("https://localhost/h", INTERNAL),
+    ("https://localhost\u3002/h", INTERNAL),  # ideographic full stop folds to a trailing dot
+    ("https://redis\u3002/h", INTERNAL),
+    ("https://postgres.railway.internal\uff61/h", INTERNAL),
     ("https://LOCALHOST./h", INTERNAL),
     ("https://api.localhost/h", INTERNAL),
     ("https://metadata.google.internal/computeMetadata/v1", INTERNAL),
@@ -108,6 +115,8 @@ BLOCKED = [
     ("https:///h", "the host is missing"),
     ("https://" + "a" * 64 + ".com/h", "the host is not a valid name"),
     ("https://example.com/" + "a" * 2048, "the URL is too long"),
+    # 2048 raw, 2228 once each "ä" label becomes xn--4ca: the DB CHECK would 500
+    ("https://" + ".".join(["ä"] * 30) + ".example.com/" + "a" * 1968, "the URL is too long"),
 ]
 
 
@@ -274,3 +283,24 @@ async def test_a_trickling_receiver_is_cut_at_the_total_deadline():
                 resolver=resolver([PUBLIC]), backend=backend, timeout=0.3,
             )  # fmt: skip
         assert loop.time() - start < 1.5
+
+
+async def test_stalled_dns_cannot_starve_the_shared_executor(monkeypatch):
+    # catches: hung webhook lookups (wait_for gives up, the thread does not) holding the default
+    # executor that asyncpg and Redis need to resolve their own hosts
+    real, gate = socket.getaddrinfo, threading.Event()
+
+    def stalls_for_slow(host, *a, **k):
+        if host == "slow.example.com":
+            gate.wait(10)
+            return []
+        return real(host, *a, **k)
+
+    monkeypatch.setattr(socket, "getaddrinfo", stalls_for_slow)
+    hung = [asyncio.create_task(ws.system_resolve("slow.example.com", 443)) for _ in range(64)]
+    await asyncio.sleep(0.05)
+    try:
+        await asyncio.wait_for(asyncio.get_running_loop().getaddrinfo("localhost", 80), 1)
+    finally:
+        gate.set()
+        await asyncio.gather(*hung, return_exceptions=True)

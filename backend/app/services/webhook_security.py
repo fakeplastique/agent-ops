@@ -11,7 +11,9 @@ import ipaddress
 import secrets
 import socket
 from collections.abc import Awaitable, Callable, Mapping
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from functools import partial
 from urllib.parse import urlsplit
 
 import httpcore2
@@ -35,12 +37,15 @@ _BLOCKED = tuple(
         "0.0.0.0/8", "10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8", "169.254.0.0/16", "172.16.0.0/12",
         "192.0.0.0/24", "192.0.2.0/24", "192.88.99.0/24", "192.168.0.0/16", "198.18.0.0/15",
         "198.51.100.0/24", "203.0.113.0/24", "224.0.0.0/4", "240.0.0.0/4",
-        "::/96", "::ffff:0:0/96", "64:ff9b:1::/48", "100::/64", "2001::/23", "2001:db8::/32",
+        "::/96", "::ffff:0:0/96", "::ffff:0:0:0/96", "64:ff9b:1::/48", "5f00::/16", "100::/64", "2001::/23", "2001:db8::/32",
         "fc00::/7", "fe80::/10", "fec0::/10", "ff00::/8",
     )
 )  # fmt: skip
 _NAT64 = ipaddress.ip_network("64:ff9b::/96")
 _INTERNAL_SUFFIXES = (".localhost", ".local", ".internal", ".home.arpa", ".localdomain", ".lan")
+# Own small pool: a lookup that wait_for gave up on keeps its thread, and must not starve the
+# default executor that asyncpg and Redis resolve their hosts on.
+_DNS_POOL = ThreadPoolExecutor(max_workers=4, thread_name_prefix="webhook-dns")
 # Below 1024 only the web ports: no SMTP, SSH or Redis-style protocol smuggling through a hook.
 _WEB_PORTS = {80, 443}
 
@@ -109,7 +114,8 @@ def check_url(url: str, *, allow_http: bool | None = None) -> Target:
         host = f"[{ip.compressed}]"
     else:
         try:  # UTS 46 folds case and full-width forms, so "１２７.０.０.１" becomes 127.0.0.1 here
-            host = idna.encode(raw, uts46=True).decode("ascii")
+            # rstrip again: UTS 46 maps "。" and "｡" to a dot the first rstrip did not see
+            host = idna.encode(raw, uts46=True).decode("ascii").rstrip(".")
         except idna.IDNAError as e:
             raise WebhookUrlRefused("the host is not a valid name") from e
         try:  # what libc would accept: 127.1, 0x7f.1, 2130706433, 0177.0.0.1
@@ -123,11 +129,15 @@ def check_url(url: str, *, allow_http: bool | None = None) -> Target:
     default = port == (443 if scheme == "https" else 80)
     netloc = host if default else f"{host}:{port}"
     query = f"?{parts.query}" if parts.query else ""
-    return Target(f"{scheme}://{netloc}{parts.path or '/'}{query}", host, port, ip)
+    normalised = f"{scheme}://{netloc}{parts.path or '/'}{query}"
+    if len(normalised) > MAX_URL:  # punycode can grow the host past the stored cap
+        raise WebhookUrlRefused("the URL is too long")
+    return Target(normalised, host, port, ip)
 
 
 async def system_resolve(host: str, port: int) -> list[str]:
-    infos = await asyncio.get_running_loop().getaddrinfo(host, port, type=socket.SOCK_STREAM)
+    lookup = partial(socket.getaddrinfo, host, port, type=socket.SOCK_STREAM)
+    infos = await asyncio.get_running_loop().run_in_executor(_DNS_POOL, lookup)
     return [str(info[4][0]) for info in infos]
 
 
