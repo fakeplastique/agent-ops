@@ -185,6 +185,17 @@ async def test_rotate_returns_new_secret_once(web, app_engine, owner_engine, cap
         )
 
 
+async def test_lone_surrogate_url_is_a_clean_422(web, app_engine, owner_engine):
+    _dns({})
+    _, admin = await _admin(app_engine, owner_engine)
+    raw = b'{"url": "https://hooks.example.com/\\ud800", "events": ["vote.cast"]}'
+    h = admin | {"content-type": "application/json"}
+    r = await web.client.post(WH, content=raw, headers=h)
+    assert r.status_code == 422, (
+        r.text
+    )  # pydantic refuses it first; the guard refuses it too (table)
+
+
 async def test_event_filter_and_per_org_cap(web, app_engine, owner_engine, monkeypatch):
     _dns({})
     _, admin = await _admin(app_engine, owner_engine)

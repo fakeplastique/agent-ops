@@ -98,6 +98,7 @@ BLOCKED = [
     ("https://example.com:99999/h", "the URL is malformed"),
     ("https://exa mple.com/h", "the URL is malformed"),
     ("https://example.com/\nh", "the URL is malformed"),  # urlsplit would strip it silently
+    ("https://example.com/\ud800", "the URL is malformed"),  # a lone surrogate would 500 in asyncpg
     ("ftp://example.com/h", "https is required"),
     ("file:///etc/passwd", "https is required"),
     ("https:///h", "the host is missing"),

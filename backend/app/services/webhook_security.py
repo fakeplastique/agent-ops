@@ -79,8 +79,10 @@ def check_url(url: str, *, allow_http: bool | None = None) -> Target:
     if len(url) > MAX_URL:
         raise WebhookUrlRefused("the URL is too long")
     # urlsplit silently drops tabs and newlines: refuse them (and any space or control) instead.
-    if any(ord(c) <= 0x20 or ord(c) == 0x7F for c in url):
-        raise WebhookUrlRefused("the URL is malformed")
+    if any(ord(c) <= 0x20 or ord(c) == 0x7F or 0xD800 <= ord(c) <= 0xDFFF for c in url):
+        raise WebhookUrlRefused(
+            "the URL is malformed"
+        )  # a lone surrogate cannot be stored as UTF-8
     try:
         parts = urlsplit(url)
         port = parts.port
