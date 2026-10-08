@@ -35,6 +35,8 @@ class Settings(BaseSettings):
     platform_admin_emails: str = ""
     # Shared secret a scraper sends as X-Metrics-Token to read GET /metrics; empty = no metrics route.
     metrics_token: str = ""
+    # Webhook targets must be https; plain http only for a local receiver in dev (refused on Railway).
+    webhooks_allow_http: bool = False
 
     @field_validator("database_url", "migrate_database_url", "worker_database_url")
     @classmethod
@@ -49,6 +51,8 @@ class Settings(BaseSettings):
             raise ValueError(
                 "RECEIPT_KEYS must be set on Railway: the dev key makes receipts forgeable"
             )
+        if os.environ.get("RAILWAY_ENVIRONMENT") and self.webhooks_allow_http:
+            raise ValueError("WEBHOOKS_ALLOW_HTTP is for local dev: hosted webhooks are https only")
         return self
 
 

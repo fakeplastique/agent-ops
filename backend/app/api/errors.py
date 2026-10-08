@@ -47,6 +47,7 @@ DOMAIN_STATUS_CODES: dict[type[DomainError], int] = {
     de.TeamInUse: 409,
     de.PlanFeatureRequired: 402,
     de.PolicyAbovePlan: 422,
+    de.WebhookUrlRefused: 422,
     de.IdempotencyKeyReuse: 422,
     de.RateLimited: 429,
     de.RateLimiterUnavailable: 503,

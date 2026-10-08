@@ -175,3 +175,13 @@ class PolicyAbovePlan(DomainError):
     def __init__(self, limit: str = "", maximum: int = 0, value: int = 0, plan: str = "") -> None:
         super().__init__(f"the {plan} plan allows {limit} up to {maximum}")
         self.details = {"limit": limit, "max": maximum, "value": value, "plan": plan}
+
+
+class WebhookUrlRefused(DomainError):
+    """Names the rule that refused the URL, never the address it resolved to (no internal topology leak)."""
+
+    code = "webhook_url_refused"
+
+    def __init__(self, rule: str = "") -> None:
+        super().__init__(f"webhook URL refused: {rule}")
+        self.details = {"rule": rule}
