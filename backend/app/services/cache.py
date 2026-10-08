@@ -37,8 +37,12 @@ def configure(store: CacheStore | None) -> None:
     _store = store
 
 
-def _dirty(session: AsyncSession | None, org: uuid.UUID) -> bool:
-    return session is not None and org in session.info.get("cache_dirty", ())
+def _bypass(session: AsyncSession | None, org: uuid.UUID) -> bool:
+    if session is None:
+        return False
+    # Entries skip RLS: only a session scoped to this org may read them, and not after it wrote to it.
+    info = session.info
+    return info.get("organization_id") != org or org in info.get("cache_dirty", ())
 
 
 async def get_or_load(
@@ -50,8 +54,7 @@ async def get_or_load(
 ) -> Any:
     """The cached JSON value of `load()` for this org; `session` is the caller's transaction, if any."""
     store = _store
-    # A transaction that has written this org must read its own writes, not entries from before them.
-    if store is None or _dirty(session, org) or BYPASS.get(org, 0) > time.monotonic():
+    if store is None or _bypass(session, org) or BYPASS.get(org, 0) > time.monotonic():
         return await load()
     try:
         key = f"cache:{org}:{await store.stamp(org)}:{name}:{args}"  # stamp read before the load

@@ -34,6 +34,7 @@ async def tenant_session(engine: AsyncEngine, org_id: uuid.UUID) -> AsyncIterato
             await session.execute(
                 text("select set_config('app.organization_id', :o, true)"), {"o": str(org_id)}
             )
+            session.info["organization_id"] = org_id  # what the cache may serve this session
             yield session
         for hook in session.info.pop("after_commit", ()):
             await hook()

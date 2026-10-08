@@ -285,3 +285,11 @@ async def test_reader_during_the_write_transaction_cannot_pin_the_old_plan(
         await plans.change_plan(s, org, "free", admin, "platform")
         assert await _flag(app_engine, org) is True  # another transaction, before the commit
     assert await _flag(app_engine, org) is False  # catches: invalidating before the commit
+
+
+async def test_a_session_of_another_tenant_never_reads_the_cache(cached, app_engine, owner_engine):
+    # The cache skips RLS: a tenant-B session asking about org A must get what RLS lets it see, not A's entry.
+    a, b = await make_org(owner_engine, "pro"), await make_org(owner_engine, "pro")
+    assert await _flag(app_engine, a) is True  # warm A
+    async with tenant_session(app_engine, b) as s:
+        assert await is_enabled(s, a, "analytics") is False  # catches: the cache as a way round RLS
