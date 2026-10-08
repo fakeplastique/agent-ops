@@ -1,3 +1,4 @@
+import json
 import logging
 import uuid
 from typing import Any
@@ -166,12 +167,17 @@ def register_error_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(RequestValidationError)
     async def validation_error_handler(_: Request, exc: RequestValidationError) -> JSONResponse:
+        details = list(exc.errors())
+        try:
+            json.dumps(jsonable_encoder(details), ensure_ascii=False).encode()
+        except UnicodeEncodeError:  # a lone surrogate in the echoed input would make this a 500
+            details = [{k: v for k, v in e.items() if k != "input"} for e in details]
         return JSONResponse(
             status_code=422,
             content=error_envelope(
                 code="invalid_input",
                 message="Validation error",
-                details=exc.errors(),
+                details=details,
             ),
         )
 

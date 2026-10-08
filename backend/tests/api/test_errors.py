@@ -2,6 +2,7 @@ import uuid
 
 from fastapi import APIRouter
 from fastapi.testclient import TestClient
+from pydantic import BaseModel
 
 from app.api.deps import get_current_principal
 from app.api.errors import DOMAIN_STATUS_CODES
@@ -22,6 +23,15 @@ def trigger_domain_error(error_name: str):
         raise err_cls(f"Sample error for {error_name}")
     except TypeError:  # errors with a fixed message take no argument
         raise err_cls() from None
+
+
+class _Named(BaseModel):
+    name: int  # a string fails here, and the error echoes it back as `input`
+
+
+@api_router.post("/named")
+def named(body: _Named):
+    return {"ok": True}
 
 
 @api_router.get("/crash")
@@ -92,3 +102,13 @@ def test_me_authenticated_returns_principal_info():
         assert body["role"] == "org_admin"
     finally:
         app.dependency_overrides.pop(get_current_principal, None)
+
+
+def test_lone_surrogate_in_a_body_is_a_422_not_a_500():
+    # catches: the 422 handler echoing an input that cannot be encoded as UTF-8 (every str field)
+    r = probe_client(api_router).post(
+        "/test-errors/named",
+        content=b'{"name": "\\ud800"}',
+        headers={"content-type": "application/json"},
+    )
+    assert r.status_code == 422 and r.json()["error"]["code"] == "invalid_input"
