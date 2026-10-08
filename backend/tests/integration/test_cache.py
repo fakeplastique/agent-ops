@@ -273,3 +273,15 @@ async def test_cache_write_racing_invalidation_does_not_resurrect_stale_data(cac
     release.set()
     assert await reader == "old"  # the reader's own answer predates the write: fine
     assert await cache.get_or_load(None, org, "probe", "x", new) == "new"  # never the late "old"
+
+
+async def test_reader_during_the_write_transaction_cannot_pin_the_old_plan(
+    cached, app_engine, owner_engine
+):
+    # A reader between the write and its commit sees the old plan and caches it: that entry must die at commit.
+    org = await make_org(owner_engine, "pro")
+    admin = await staff(owner_engine, org, "org_admin")
+    async with tenant_session(app_engine, org) as s:
+        await plans.change_plan(s, org, "free", admin, "platform")
+        assert await _flag(app_engine, org) is True  # another transaction, before the commit
+    assert await _flag(app_engine, org) is False  # catches: invalidating before the commit
