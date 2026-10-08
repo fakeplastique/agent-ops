@@ -7,7 +7,8 @@ from fastapi import FastAPI, Request, Response
 from starlette.routing import Route
 from starlette.types import Receive, Scope, Send
 
-from app.api import health
+from app.adapters.cache_redis import RedisCache
+from app.api import health, metrics
 from app.api.errors import document_errors, register_error_handlers
 from app.api.limits import BodyLimitMiddleware
 from app.api.v1 import api_v1_router
@@ -15,6 +16,7 @@ from app.config import settings
 from app.db.engine import make_engine
 from app.db.guard import assert_safe_role
 from app.mcp.server import http_app
+from app.services import cache
 
 
 @asynccontextmanager
@@ -27,8 +29,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await engine.dispose()
     # The SDK runs an MCP app's task group once per instance, so every startup builds its own.
     app.state.mcp = mcp_app = http_app()
-    async with mcp_app.router.lifespan_context(mcp_app):
-        yield
+    store = RedisCache(settings.redis_url)
+    cache.configure(
+        store
+    )  # REST and MCP share it: both reach flags and policies through the services
+    try:
+        async with mcp_app.router.lifespan_context(mcp_app):
+            yield
+    finally:
+        cache.configure(None)
+        await store.redis.aclose()
 
 
 class McpEndpoint:
@@ -56,6 +66,7 @@ async def request_id_middleware(request: Request, call_next) -> Response:
 
 register_error_handlers(app)
 app.include_router(health.router)
+app.include_router(metrics.router)
 app.include_router(api_v1_router)
 app.router.routes.append(
     Route("/mcp", McpEndpoint())

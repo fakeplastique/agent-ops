@@ -6,7 +6,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.errors import AlreadyExists, InvalidInput, NotFoundError, TeamInUse
-from app.services import audit
+from app.services import audit, cache
 from app.services.validation import check_text
 
 _COLS = "id, name, parent_team_id, created_at"
@@ -106,6 +106,7 @@ async def update_team(
     except IntegrityError as e:
         raise _unique(e) from e
     await audit.record(s, org, "team", team, "updated", "user", actor)
+    cache.invalidate(s, org)  # a move changes every member's policy chain below it
     return dict(row)
 
 

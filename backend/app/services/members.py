@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from app.db.session import use_tenant
 from app.domain.errors import InvalidInput, LastOrgAdmin, NotFoundError, SlugTaken
-from app.services import audit
+from app.services import audit, cache
 from app.services.invitations import ROLES
 from app.services.validation import check_text
 
@@ -112,3 +112,4 @@ async def remove_member(
     if done is None:
         raise NotFoundError
     await audit.record(session, org, "membership", user_id, "member_removed", "user", actor)
+    cache.invalidate(session, org)  # their team no longer picks their policy

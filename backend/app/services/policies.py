@@ -15,7 +15,7 @@ from app.domain.errors import (
     PolicyUnresolved,
 )
 from app.domain.risk import ACTION_TYPE, effective_risk
-from app.services import audit, plans
+from app.services import audit, cache, plans
 from app.services.validation import check_text
 
 RISKS = frozenset({"low", "medium", "high"})
@@ -100,6 +100,15 @@ async def resolve_policy(
     session: AsyncSession, organization_id: uuid.UUID, owner_user_id: uuid.UUID
 ) -> dict[str, Any]:
     """The policy that applies to this owner, as the JSON snapshot stored on the request."""
+    return await cache.get_or_load(
+        session, organization_id, "policy", str(owner_user_id),
+        lambda: _resolve(session, organization_id, owner_user_id),
+    )  # fmt: skip
+
+
+async def _resolve(
+    session: AsyncSession, organization_id: uuid.UUID, owner_user_id: uuid.UUID
+) -> dict[str, Any]:
     row = (
         (await session.execute(_RESOLVE, {"o": organization_id, "u": owner_user_id}))
         .mappings()
@@ -220,6 +229,7 @@ async def create_policy(
     except IntegrityError as e:  # (organization_id, team_id) unique: one default, one per team
         raise AlreadyExists("this scope already has a policy") from e
     await audit.record(session, org, "escalation_policy", row["id"], "created", "user", actor)
+    cache.invalidate(session, org)
     return dict(row)
 
 
@@ -256,6 +266,7 @@ async def update_policy(
         .one()
     )
     await audit.record(session, org, "escalation_policy", policy_id, "updated", "user", actor)
+    cache.invalidate(session, org)
     return dict(row)
 
 
@@ -266,3 +277,4 @@ async def delete_policy(
     if (await session.execute(_DELETE, {"o": org, "i": policy_id})).first() is None:
         raise NotFoundError
     await audit.record(session, org, "escalation_policy", policy_id, "deleted", "user", actor)
+    cache.invalidate(session, org)

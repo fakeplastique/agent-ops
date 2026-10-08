@@ -16,7 +16,7 @@ from app.domain.errors import (
     NotFoundError,
 )
 from app.ports.clock import Clock
-from app.services import audit
+from app.services import audit, cache
 from app.services.tokens import new_token
 from app.services.validation import check_text
 
@@ -141,4 +141,5 @@ async def accept_invitation(
         if joined is None:  # already a member: roll the acceptance back so the link is not burned
             raise AlreadyMember
         await c.execute(_AUDIT, {"o": org, "i": inv, "u": user_id, "d": f'{{"role": "{role}"}}'})
-        return org, role
+    await cache.invalidate_now(org)  # committed: the new member's team now picks their policy
+    return org, role
