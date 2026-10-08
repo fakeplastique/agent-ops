@@ -4,8 +4,11 @@ from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings
 
 from app.domain.receipt import KeyRing
+from app.domain.secretbox import SecretBox
 
 DEV_RECEIPT_KEYS = "dev:dev-receipt-key-not-for-production"
+# base64 of "dev-webhook-key-not-for-prod-use" (32 bytes)
+DEV_WEBHOOK_SECRET_KEYS = "dev:ZGV2LXdlYmhvb2sta2V5LW5vdC1mb3ItcHJvZC11c2U="
 
 
 class Settings(BaseSettings):
@@ -37,6 +40,8 @@ class Settings(BaseSettings):
     metrics_token: str = ""
     # Webhook targets must be https; plain http only for a local receiver in dev (refused on Railway).
     webhooks_allow_http: bool = False
+    # `kid:base64(32 bytes),...` (AES-256-GCM for stored webhook secrets); the last seals, all open.
+    webhook_secret_keys: str = DEV_WEBHOOK_SECRET_KEYS
 
     @field_validator("database_url", "migrate_database_url", "worker_database_url")
     @classmethod
@@ -50,6 +55,14 @@ class Settings(BaseSettings):
         if os.environ.get("RAILWAY_ENVIRONMENT") and self.receipt_keys == DEV_RECEIPT_KEYS:
             raise ValueError(
                 "RECEIPT_KEYS must be set on Railway: the dev key makes receipts forgeable"
+            )
+        SecretBox.parse(self.webhook_secret_keys)
+        if (
+            os.environ.get("RAILWAY_ENVIRONMENT")
+            and self.webhook_secret_keys == DEV_WEBHOOK_SECRET_KEYS
+        ):
+            raise ValueError(
+                "WEBHOOK_SECRET_KEYS must be set on Railway: the dev key is public in git"
             )
         if os.environ.get("RAILWAY_ENVIRONMENT") and self.webhooks_allow_http:
             raise ValueError("WEBHOOKS_ALLOW_HTTP is for local dev: hosted webhooks are https only")

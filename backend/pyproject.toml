@@ -13,6 +13,7 @@ dependencies = [
   "authlib>=1.9.1",
   "httpx2>=2.16.0",
   "mcp>=2.3.0",
+  "cryptography>=50.0.2",
 ]
 
 [dependency-groups]

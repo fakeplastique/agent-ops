@@ -4,7 +4,11 @@ The attacker controls the URL and its DNS, so a name is resolved once, every ans
 socket goes to the checked address while Host, SNI and the certificate check keep the original name."""
 
 import asyncio
+import base64
+import hashlib
+import hmac
 import ipaddress
+import secrets
 import socket
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
@@ -194,3 +198,38 @@ async def post_pinned(
     if 300 <= status < 400:
         raise WebhookUrlRefused("redirects are not followed")
     return status
+
+
+# Signing: Standard Webhooks (D18), checked against the official vectors in tests/unit/test_webhook_signing.py.
+SECRET_TAG = "whsec_"
+TOLERANCE = (
+    300  # seconds a receiver accepts around webhook-timestamp (the reference libraries' window)
+)
+
+
+def new_secret() -> str:
+    return SECRET_TAG + base64.b64encode(secrets.token_bytes(32)).decode()
+
+
+def sign(secret: str, msg_id: str, timestamp: int, body: bytes) -> str:
+    """`v1,` + base64 HMAC-SHA256 over `id.timestamp.body`, keyed by the base64 part of the whsec_ secret."""
+    key = base64.b64decode(secret.removeprefix(SECRET_TAG))
+    signed = f"{msg_id}.{timestamp}.".encode() + body
+    return "v1," + base64.b64encode(hmac.new(key, signed, hashlib.sha256).digest()).decode()
+
+
+def signed_headers(secret: str, msg_id: str, timestamp: int, body: bytes) -> dict[str, str]:
+    return {
+        "webhook-id": msg_id,
+        "webhook-timestamp": str(timestamp),
+        "webhook-signature": sign(secret, msg_id, timestamp, body),
+        "content-type": "application/json",
+    }
+
+
+def verify(secret: str, msg_id: str, timestamp: int, body: bytes, header: str, *, now: int) -> bool:
+    """What a receiver does: any listed v1 signature matches, and the timestamp is within the window."""
+    if abs(now - timestamp) > TOLERANCE:
+        return False
+    want = sign(secret, msg_id, timestamp, body)
+    return any(hmac.compare_digest(want, s) for s in header.split())
