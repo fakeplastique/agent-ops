@@ -106,6 +106,8 @@ EXEMPT: set[str] = {
     "/api/v1/escalation-policies",  # same; a foreign team_id is 404 (tests/api/test_policies.py)
     "/api/v1/organizations/current/plan",  # the caller's own organization, no id parameter
     "/api/v1/webhook-subscriptions",  # create and list: the tenant comes from the caller
+    # The tenant comes from the credential; no id parameter (tests/cross_tenant/test_events.py).
+    "/api/v1/events",
     # Cross-tenant by design for platform admins; everyone else gets 403 before any id is read
     # (tests/integration/test_flag_paths.py::test_platform_admin_only_from_env_allowlist).
     "/api/v1/platform/organizations/{organization_id}/plan",
