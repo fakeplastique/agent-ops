@@ -18,7 +18,26 @@ export class ApiError extends Error {
   }
 }
 
-type Options = { method?: string; body?: unknown; signal?: AbortSignal };
+/** timeoutMs covers the whole call, body included (default 15 s; the /events long-poll needs longer). */
+type Options = { method?: string; body?: unknown; signal?: AbortSignal; timeoutMs?: number };
+
+const timedOut = () => new ApiError(0, "timeout", "The server took too long to answer");
+
+// Rejects as soon as the deadline or the caller's signal fires, even if the wrapped read never settles (a stalled body).
+function bounded<R>(p: Promise<R>, deadline: AbortSignal, signal?: AbortSignal): Promise<R> {
+  return new Promise<R>((resolve, reject) => {
+    const onDeadline = () => reject(timedOut());
+    const onAbort = () => reject(signal?.reason);
+    if (signal?.aborted) return onAbort();
+    if (deadline.aborted) return onDeadline();
+    deadline.addEventListener("abort", onDeadline, { once: true });
+    signal?.addEventListener("abort", onAbort, { once: true });
+    p.then(resolve, reject).finally(() => {
+      deadline.removeEventListener("abort", onDeadline);
+      signal?.removeEventListener("abort", onAbort);
+    });
+  });
+}
 
 // Retry-After is seconds or an HTTP date.
 function seconds(header: string | null): number | null {
@@ -52,28 +71,35 @@ function toLogin() {
 }
 
 /** Same-origin JSON call to the REST API. Resolves only on 2xx; everything else rejects with ApiError. */
-export async function api<T = unknown>(path: string, { method = "GET", body, signal }: Options = {}): Promise<T> {
-  const timeout = new AbortController();
-  const timer = setTimeout(() => timeout.abort(), TIMEOUT_MS);
-  const signals = signal ? AbortSignal.any([signal, timeout.signal]) : timeout.signal;
-  let res: Response;
+export async function api<T = unknown>(
+  path: string,
+  { method = "GET", body, signal, timeoutMs = TIMEOUT_MS }: Options = {},
+): Promise<T> {
+  const deadline = new AbortController();
+  const timer = setTimeout(() => deadline.abort(), timeoutMs);
+  const within = <R,>(p: Promise<R>) => bounded(p, deadline.signal, signal);
   try {
-    res = await fetch(`${BASE}${path}`, {
-      method,
-      credentials: "same-origin",
-      headers: body === undefined ? undefined : { "content-type": "application/json" },
-      body: body === undefined ? undefined : JSON.stringify(body),
-      signal: signals,
-    });
-  } catch (err) {
-    if (signal?.aborted) throw err; // the caller cancelled; not a failure to show
-    if (timeout.signal.aborted) throw new ApiError(0, "timeout", "The server took too long to answer");
-    throw new ApiError(0, "network", "No response from the server");
+    let res: Response;
+    try {
+      res = await within(
+        fetch(`${BASE}${path}`, {
+          method,
+          credentials: "same-origin",
+          headers: body === undefined ? undefined : { "content-type": "application/json" },
+          body: body === undefined ? undefined : JSON.stringify(body),
+          signal: signal ? AbortSignal.any([signal, deadline.signal]) : deadline.signal,
+        }),
+      );
+    } catch (err) {
+      if (signal?.aborted) throw err; // the caller cancelled; not a failure to show
+      if (deadline.signal.aborted) throw timedOut();
+      throw new ApiError(0, "network", "No response from the server");
+    }
+    if (res.status === 401) toLogin();
+    if (!res.ok) throw await within(toError(res));
+    if (res.status === 204) return undefined as T;
+    return (await within(res.json())) as T;
   } finally {
-    clearTimeout(timer);
+    clearTimeout(timer); // only once the body has been read
   }
-  if (res.status === 401) toLogin();
-  if (!res.ok) throw await toError(res);
-  if (res.status === 204) return undefined as T;
-  return (await res.json()) as T;
 }

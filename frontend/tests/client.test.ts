@@ -104,6 +104,41 @@ describe("api client", () => {
     expect(await p).toMatchObject({ status: 0, code: "timeout" });
   });
 
+  // Headers arrive, then the body stalls: the deadline must still cover the body read.
+  const stalled = (status: number) =>
+    vi.fn(() => Promise.resolve(new Response(new ReadableStream({ start() {} }), { status, headers: { "content-type": "application/json" } })));
+
+  it("a 200 whose body never finishes fails as a timeout", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("fetch", stalled(200));
+    const p = failure(api("/decision-requests"));
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(await p).toMatchObject({ status: 0, code: "timeout" });
+  });
+
+  it("an error status whose body never finishes fails as a timeout", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("fetch", stalled(500));
+    const p = failure(api("/decision-requests"));
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(await p).toMatchObject({ status: 0, code: "timeout" });
+  });
+
+  // The /events long-poll legitimately waits up to 25 s.
+  it("a per-call timeout replaces the 15 s default", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((_url: string, init: RequestInit) => new Promise((_, rej) => init.signal?.addEventListener("abort", () => rej(init.signal?.reason)))),
+    );
+    let settled = false;
+    const p = failure(api("/events", { timeoutMs: 30_000 })).finally(() => (settled = true));
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(await p).toMatchObject({ status: 0, code: "timeout" });
+  });
+
   it("a caller abort is passed through, not reported as a network error", async () => {
     const ctl = new AbortController();
     vi.stubGlobal(
