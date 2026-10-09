@@ -4,6 +4,7 @@ import asyncio
 import base64
 import logging
 import re
+import uuid
 from pathlib import Path
 
 import pytest
@@ -16,8 +17,10 @@ from app.domain.secretbox import SealError, SecretBox
 from app.main import app
 from app.services import webhook_security as ws
 from app.services import webhooks
+from app.worker import webhooks as worker
 from tests.api.harness import agent_auth, user_auth
-from tests.integration.helpers import fetch, make_world, staff
+from tests.integration.helpers import NOW, fetch, make_world, staff
+from tests.integration.webhook_harness import emit
 from tests.security.test_token_hygiene import whole_database_text
 
 pytestmark = pytest.mark.anyio
@@ -236,6 +239,45 @@ async def test_two_concurrent_creates_cannot_both_pass_the_cap(
         owner_engine, "select count(*) from webhook_subscriptions where organization_id=:o", o=w.org
     )
     assert rows == [(1,)]
+
+
+async def answered_204(url, body, headers) -> int:
+    return 204
+
+
+async def test_deliveries_list_and_redeliver(web, app_engine, owner_engine):
+    _dns({})
+    w, admin = await _admin(app_engine, owner_engine)
+    sub = (await web.client.post(WH, json=BODY, headers=admin)).json()
+    event = await emit(app_engine, w.org)
+    await worker.fan_out(app_engine, w.org, event, NOW, send=answered_204)
+    deliveries = f"{WH}/{sub['id']}/deliveries"
+    page = (await web.client.get(deliveries, headers=admin)).json()
+    assert page["total"] == 1
+    [d] = page["items"]
+    assert (d["event_id"], d["event_type"], d["status"], d["attempt"]) == (
+        str(event), "decision.created", "delivered", 1
+    )  # fmt: skip
+    assert (d["last_status_code"], d["last_error"], d["next_attempt_at"]) == (204, None, None)
+    again = f"{deliveries}/{d['id']}/redeliver"
+    for _ in range(2):  # the second press finds it already queued: no second reset, no second audit
+        r = await web.client.post(again, headers=admin)
+        assert r.status_code == 202, r.text
+        assert (r.json()["id"], r.json()["status"], r.json()["attempt"]) == (d["id"], "pending", 0)
+    audit = await fetch(owner_engine, "select action from audit_logs where entity_id=:d", d=d["id"])
+    assert audit == [("redelivered",)]
+    other = (await web.client.post(WH, json=BODY, headers=admin)).json()["id"]
+    for path in (  # a delivery is reached only through its own subscription
+        f"{WH}/{other}/deliveries/{d['id']}/redeliver",
+        f"{deliveries}/{uuid.uuid4()}/redeliver",
+    ):
+        assert (await web.client.post(path, headers=admin)).status_code == 404, path
+    assert (
+        await web.client.get(f"{WH}/{uuid.uuid4()}/deliveries", headers=admin)
+    ).status_code == 404
+    member = await user_auth(app_engine, w.org, await staff(owner_engine, w.org, "manager"))
+    assert (await web.client.get(deliveries, headers=member)).status_code == 403
+    assert (await web.client.post(again, headers=member)).status_code == 403
 
 
 async def test_dns_is_resolved_before_any_transaction_opens(web, app_engine, owner_engine):

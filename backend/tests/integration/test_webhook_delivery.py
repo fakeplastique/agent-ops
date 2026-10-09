@@ -6,6 +6,8 @@ from datetime import timedelta
 
 import pytest
 from arq.worker import Retry
+from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.config import settings
@@ -244,3 +246,47 @@ async def test_round_one_vote_events_carry_session_and_round_only_before_reveal(
         assert not {"verdict", "confidence", "rationale"} & set(m["data"]), m
     assert {v["verdict"] for v in sent[3]["data"]["votes"]} == {"reject"}  # revealed: now it may
     assert (sent[5]["data"]["verdict"], "rationale" in sent[5]["data"]) == ("reject", False)
+
+
+async def _refused(engine, sql, **params) -> bool:
+    try:
+        async with engine.begin() as c:
+            await c.execute(text(sql), params)
+    except DBAPIError:
+        return True
+    return False
+
+
+async def test_the_sweep_sees_ids_only_and_a_row_keeps_its_identity(
+    app_engine, owner_engine, worker_engine
+):
+    # catches: the cross-tenant worker role reading URLs or errors, or a tenant moving a delivery
+    w = await make_world(owner_engine)
+    sub = await subscribe(app_engine, w.org, 8099)
+    event = await emit(app_engine, w.org)
+    await worker.fan_out(app_engine, w.org, event, NOW, send=sender({8099: Receiver(port=1)}))
+    delivery = await _only_delivery(owner_engine, event)
+    for sql in (
+        "select last_error from webhook_deliveries",
+        "select event_id from webhook_deliveries",
+        "select url from webhook_subscriptions",
+        "update webhook_deliveries set status = 'dead'",
+    ):
+        assert await _refused(worker_engine, sql), sql
+    async with worker_engine.connect() as c:
+        seen = (await c.execute(text("select id from webhook_deliveries"))).scalars().all()
+    assert delivery in seen  # pending rows of every tenant, by id
+    other = await subscribe(app_engine, w.org, 8099)
+    for col, value in (("subscription_id", other["id"]), ("event_id", uuid.uuid4()),
+                       ("organization_id", uuid.uuid4()), ("id", uuid.uuid4())):  # fmt: skip
+        sql = f"update webhook_deliveries set {col} = :v where id = :d"
+        try:
+            async with tenant_session(app_engine, w.org) as s:
+                await s.execute(text(sql), {"v": value, "d": delivery})
+            moved = True
+        except DBAPIError:
+            moved = False
+        assert not moved, col
+    assert sub["id"] == (await fetch(
+        owner_engine, "select subscription_id from webhook_deliveries where id = :d", d=delivery
+    ))[0][0]  # fmt: skip

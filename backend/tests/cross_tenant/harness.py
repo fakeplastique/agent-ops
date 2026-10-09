@@ -75,6 +75,15 @@ ROUTES: dict[tuple[str, str], str] = {
         "POST",
         "/api/v1/webhook-subscriptions/{subscription_id}/rotate-secret",
     ): "tenant B mints a signing secret for tenant A's webhook",
+    # S28, probed with every principal by tests/cross_tenant/test_rest_routes.py.
+    (
+        "GET",
+        "/api/v1/webhook-subscriptions/{subscription_id}/deliveries",
+    ): "tenant B reads tenant A's delivery log",
+    (
+        "POST",
+        "/api/v1/webhook-subscriptions/{subscription_id}/deliveries/{delivery_id}/redeliver",
+    ): "tenant B re-sends tenant A's events",
 }
 
 # Routes that carry no tenant data.

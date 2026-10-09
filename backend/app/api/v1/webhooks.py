@@ -5,7 +5,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Request, Response
 from pydantic import BaseModel, Field, StrictBool
 
-from app.api.deps import AdminDep, EngineDep, write_limit
+from app.api.deps import AdminDep, ClockDep, EngineDep, write_limit
 from app.api.pagination import Page, PaginationParams, paginate
 from app.api.schemas.base import BaseSchema
 from app.db.session import tenant_session
@@ -119,6 +119,49 @@ async def rotate_secret(
             s, admin.organization_id, admin.user_id, subscription_id
         )
     return WebhookSecret(id=subscription_id, secret=secret)
+
+
+class DeliveryOut(BaseModel):
+    id: uuid.UUID  # also the webhook-id the receiver saw
+    event_id: uuid.UUID
+    event_type: str
+    status: str  # pending | delivered | dead
+    attempt: int
+    next_attempt_at: datetime | None
+    last_status_code: int | None
+    last_error: str | None  # a short reason, never a response body
+    created_at: datetime
+    updated_at: datetime
+
+
+@router.get("/{subscription_id}/deliveries", response_model=Page[DeliveryOut])
+async def list_deliveries(
+    subscription_id: uuid.UUID, request: Request, admin: AdminDep, engine: EngineDep,
+    page: Annotated[PaginationParams, Depends()],
+) -> Page[DeliveryOut]:  # fmt: skip
+    async with tenant_session(engine, admin.organization_id) as s:
+        rows, total = await webhooks.list_deliveries(
+            s, admin.organization_id, subscription_id, page.skip, page.limit
+        )
+    return paginate(request, [DeliveryOut(**r) for r in rows], total, page.skip, page.limit)
+
+
+@router.post(
+    "/{subscription_id}/deliveries/{delivery_id}/redeliver",
+    status_code=202,
+    response_model=DeliveryOut,
+    dependencies=[Depends(write_limit)],
+)
+async def redeliver(
+    subscription_id: uuid.UUID, delivery_id: uuid.UUID, admin: AdminDep, engine: EngineDep,
+    clock: ClockDep,
+) -> DeliveryOut:  # fmt: skip
+    # Queued only: the worker's retry sweep sends it, so this request makes no outbound call.
+    async with tenant_session(engine, admin.organization_id) as s:
+        row = await webhooks.redeliver(
+            s, admin.organization_id, admin.user_id, subscription_id, delivery_id, clock.now()
+        )
+    return DeliveryOut(**row)
 
 
 @router.delete("/{subscription_id}", status_code=204, dependencies=[Depends(write_limit)])
