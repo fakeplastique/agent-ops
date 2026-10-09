@@ -3,6 +3,7 @@ from typing import Any
 from arq import cron, func
 from arq.connections import RedisSettings
 
+from app.adapters.analytics_log import LogAnalytics
 from app.adapters.clock import SystemClock
 from app.config import settings
 from app.db.engine import make_engine
@@ -16,6 +17,7 @@ async def startup(ctx: dict[str, Any]) -> None:
     ctx["scan_engine"] = make_engine(settings.worker_database_url)
     ctx["work_engine"] = make_engine(settings.database_url)
     ctx["clock"] = SystemClock()
+    ctx["analytics"] = LogAnalytics()
 
 
 async def shutdown(ctx: dict[str, Any]) -> None:

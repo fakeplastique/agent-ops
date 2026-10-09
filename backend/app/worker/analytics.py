@@ -6,16 +6,15 @@ from typing import Any
 
 from sqlalchemy import text
 
-from app.adapters.analytics_log import LogAnalytics
 from app.db.session import tenant_session
 from app.domain.statuses import Risk, Status
-from app.ports.analytics import Analytics, Prop
+from app.ports.analytics import Prop
 from app.services.plans import PLANS
 
 ENUMS = frozenset({*(s.value for s in Status), *(r.name.lower() for r in Risk), *PLANS})
 DEDUP_TTL = 7 * 24 * 3600  # far past arq's 1 h job-id memory and any relay re-send
+IN_FLIGHT_TTL = 60  # a job killed mid-emit leaves this marker only briefly, then a retry emits
 _READ = text("select type, payload from outbox_events where organization_id = :o and id = :e")
-_SINK: Analytics = LogAnalytics()
 
 
 def _is_uuid(value: str) -> bool:
@@ -28,7 +27,7 @@ def _is_uuid(value: str) -> bool:
 def check_props(props: Mapping[str, Any]) -> None:
     """Refuse anything but ids, known enums and integers: free text could carry PII."""
     for key, value in props.items():
-        ok = value is None or type(value) in (int, bool)
+        ok = value is None or type(value) is int  # bool is an int subclass: refused
         ok = ok or (isinstance(value, str) and (value in ENUMS or _is_uuid(value)))
         if not ok:
             raise ValueError(f"analytics prop {key!r} is not an id, enum or integer")
@@ -69,13 +68,15 @@ async def analytics_job(ctx: dict[str, Any], organization_id: str, event_id: str
     name, props = mapped
     props = {"event_id": str(e), "organization_id": str(o)} | props
     check_props(props)
-    # The effect is outside the database, so the done-marker lives in Redis; set first, undone on failure.
+    # The effect is outside the database, so the marker lives in Redis: claimed briefly, kept long only once
+    # the emit returned, removed when it raised.
     key = f"analytics:done:{e}"
-    if not await ctx["redis"].set(key, "1", nx=True, ex=DEDUP_TTL):
+    if not await ctx["redis"].set(key, "1", nx=True, ex=IN_FLIGHT_TTL):
         return "duplicate"
     try:
-        ctx.get("analytics", _SINK).emit(name, props)
+        ctx["analytics"].emit(name, props)
     except Exception:
         await ctx["redis"].delete(key)
         raise
+    await ctx["redis"].expire(key, DEDUP_TTL)
     return name

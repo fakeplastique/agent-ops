@@ -1,5 +1,6 @@
 """S34: the analytics consumer turns outbox events into Analytics events that carry ids and enums only."""
 
+import asyncio
 import uuid
 
 import pytest
@@ -7,6 +8,7 @@ from redis.asyncio import Redis
 
 from app.db.session import tenant_session
 from app.services import plans
+from app.worker import analytics as consumer
 from app.worker.analytics import analytics_job, check_props
 from tests.conftest import TEST_REDIS
 from tests.integration.helpers import (
@@ -121,6 +123,42 @@ async def test_a_foreign_event_id_reads_nothing(app_engine, owner_engine, redis)
 
 def test_check_props_refuses_free_text():
     check_props({"decision_request_id": str(uuid.uuid4()), "risk_level": "low", "level": 2})
-    for bad in ("Refund order 7", "jane@example.test", 0.5, ["x"], {"a": 1}):
+    for bad in ("Refund order 7", "jane@example.test", 0.5, ["x"], {"a": 1}, True):
         with pytest.raises(ValueError):
             check_props({"x": bad})
+
+
+class DiesOnce(Recorder):
+    """The worker is cancelled (or killed) mid-emit once: nothing reached the provider."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.died = False
+
+    def emit(self, name: str, props) -> None:
+        if not self.died:
+            self.died = True
+            raise asyncio.CancelledError
+        super().emit(name, props)
+
+
+async def test_a_job_that_dies_after_the_marker_is_retried(
+    app_engine, owner_engine, redis, monkeypatch
+):
+    # catches: a long done-marker set before the effect (a kill after it loses the event for days)
+    monkeypatch.setattr(consumer, "IN_FLIGHT_TTL", 1)
+    w = await make_world(owner_engine, "pro")
+    await open_request(app_engine, w)
+    [(event_id,)] = await fetch(
+        owner_engine, "select id from outbox_events where organization_id=:o", o=w.org
+    )
+    sink = DiesOnce()
+    ctx = {"work_engine": app_engine, "redis": redis, "analytics": sink}
+    with pytest.raises(asyncio.CancelledError):
+        await analytics_job(ctx, str(w.org), str(event_id))
+    assert await analytics_job(ctx, str(w.org), str(event_id)) == "duplicate"  # still in flight
+    await asyncio.sleep(1.2)
+    assert await analytics_job(ctx, str(w.org), str(event_id)) == "decision_created"
+    assert [n for n, _ in sink.events] == ["decision_created"]
+    assert await redis.ttl(f"analytics:done:{event_id}") > consumer.IN_FLIGHT_TTL  # done: kept long
+    assert await analytics_job(ctx, str(w.org), str(event_id)) == "duplicate"

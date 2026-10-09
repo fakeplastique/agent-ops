@@ -1,6 +1,9 @@
+import pytest
+
+from app.adapters.analytics_log import LogAnalytics
 from app.config import settings
 from app.worker.registry import CONCERNS, job_id
-from app.worker.settings import WorkerSettings
+from app.worker.settings import WorkerSettings, shutdown, startup
 
 
 def test_the_relay_runs_every_second_and_the_timeout_sweep_every_minute():
@@ -19,3 +22,13 @@ def test_job_ids_are_stable_per_event_and_concern():
 def test_the_analytics_consumer_is_registered_under_its_concern():
     assert "analytics" in CONCERNS
     assert "analytics" in {f.name for f in WorkerSettings.functions}
+
+
+@pytest.mark.anyio
+async def test_startup_wires_the_analytics_sink():
+    ctx: dict = {}
+    await startup(ctx)
+    try:
+        assert isinstance(ctx["analytics"], LogAnalytics)
+    finally:
+        await shutdown(ctx)
