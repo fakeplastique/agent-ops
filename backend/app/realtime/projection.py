@@ -26,13 +26,15 @@ _TABLE: dict[str, tuple[Action, tuple[str, ...]]] = {
     "plan.changed": (Action.READ_PLAN, ("organization_id", "from", "to")),
 }
 _REVEALED_VOTE = ("session_id", "verdict", "confidence")
+TYPES = frozenset(_TABLE)  # a test holds this equal to services.webhooks.EVENT_TYPES
 
 
-def project(type_: str, payload: dict[str, Any], role: Role) -> dict[str, Any] | None:
+def project(type_: str, payload: Any, role: Role) -> dict[str, Any] | None:
     """What this role may read of one event, or None. Blindness has no role exemption: a round-1 vote
     never carries verdict or confidence here, whoever asks (the rationale never leaves at all)."""
     rule = _TABLE.get(type_)
-    if rule is None or not can(role, rule[0]):
+    # A payload that is no JSON object is skipped, never a 500 that would pin every later poll.
+    if rule is None or not isinstance(payload, dict) or not can(role, rule[0]):
         return None
     out = {k: payload[k] for k in rule[1] if k in payload}
     # Only round 2 is open; `type is int` keeps True (== 1) and "2" from passing as a round number.
