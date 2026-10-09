@@ -20,11 +20,22 @@ logger = logging.getLogger(__name__)
 MAX_WAIT = 25  # seconds; the route refuses more
 TICK = 0.5  # re-query interval while waiting (S29-D1: no transaction is held across a sleep)
 MAX_WAITERS = 5  # concurrent polls per user and organization (S29-D5)
-_SLOT_TTL = MAX_WAIT + 5  # a slot outlives its poll's longest wait, then frees itself
+# A slot outlives its slowest poll, then frees itself: after the last deadline check a poll can still wait
+# on three pool checkouts (one read, two to re-resolve the credential; SQLAlchemy's default 30 s each).
+_POOL_TIMEOUT = 30
+_SLOT_TTL = MAX_WAIT + 3 * _POOL_TIMEOUT + 5
+_releasing: set[asyncio.Task[None]] = set()  # strong refs: the loop keeps only weak ones
 
 
 def waiter_key(org: uuid.UUID, user: uuid.UUID) -> str:
     return f"lp:{org}:{user}"
+
+
+async def _release(redis: Redis, key: str, slot: str) -> None:
+    try:
+        await asyncio.wait_for(redis.zrem(key, slot), 2)
+    except (RedisError, OSError, TimeoutError):
+        logger.warning("waiter slot not released; it expires by itself")
 
 
 @asynccontextmanager
@@ -37,24 +48,26 @@ async def waiter_slot(
     429 with Retry-After; a limiter outage is 503 (fails closed like the write limiter)."""
     key, slot = waiter_key(org, user), uuid.uuid4().hex
     try:
-        async with redis.pipeline(transaction=True) as p:
-            p.zremrangebyscore(key, "-inf", now)
-            p.zadd(key, {slot: now + _SLOT_TTL})
-            p.zcard(key)
-            p.zrange(key, 0, 0, withscores=True)
-            p.expire(key, _SLOT_TTL)
-            _, _, count, oldest, _ = await p.execute()
-    except (RedisError, OSError) as e:
-        raise RateLimiterUnavailable from e
-    try:
+        try:
+            async with redis.pipeline(transaction=True) as p:
+                p.zremrangebyscore(key, "-inf", now)
+                p.zadd(key, {slot: now + _SLOT_TTL})
+                p.zcard(key)
+                p.zrange(key, 0, 0, withscores=True)
+                p.expire(key, _SLOT_TTL)
+                _, _, count, oldest, _ = await p.execute()
+        except (RedisError, OSError) as e:
+            raise RateLimiterUnavailable from e
         if count > MAX_WAITERS:
             raise RateLimited(min(_SLOT_TTL, math.ceil(oldest[0][1] - now)))
         yield
     finally:
-        try:
-            await redis.zrem(key, slot)
-        except (RedisError, OSError):
-            logger.warning("waiter slot not released; it expires by itself")
+        # Its own task, shielded: a cancelled handler (anyio cancels again at every await) still releases,
+        # and so does a cancel that lands after the pipeline was applied.
+        task = asyncio.ensure_future(_release(redis, key, slot))
+        _releasing.add(task)
+        task.add_done_callback(_releasing.discard)
+        await asyncio.shield(task)
 
 
 async def poll(

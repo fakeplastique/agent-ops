@@ -3,6 +3,7 @@ import random
 import time
 import uuid
 
+import anyio
 import pytest
 from redis.asyncio import Redis
 from sqlalchemy import text
@@ -340,7 +341,9 @@ async def test_concurrent_waiters_per_user_are_capped(web, app_engine, owner_eng
         await _until_waiting(redis, key, 2)
         over = await poll(web, h, wait=20)
         # catches: one credential opening unbounded 25 s waiters that each query twice a second
-        assert over.status_code == 429 and 1 <= int(over.headers["Retry-After"]) <= 30
+        assert (
+            over.status_code == 429 and 1 <= int(over.headers["Retry-After"]) <= longpoll._SLOT_TTL
+        )
         assert (await poll(web, ho)).status_code == 200  # another user is not affected
         await plant(app_engine, org, "plan.changed", {"organization_id": str(org), "to": "pro"})
         assert [r.status_code for r in await asyncio.gather(*held)] == [200, 200]
@@ -363,3 +366,31 @@ async def test_waiter_cap_store_down_is_503_not_unbounded(web, app_engine, owner
         await down.aclose()
     # catches: a limiter outage lifting the cap (fails closed like the write limiter)
     assert res.status_code == 503 and res.json()["error"]["code"] == "rate_limiter_unavailable"
+
+
+async def test_a_cancelled_poll_still_releases_its_slot():
+    redis = Redis.from_url(TEST_REDIS)
+    org, user = uuid.uuid4(), uuid.uuid4()
+    key = longpoll.waiter_key(org, user)
+    try:
+        # anyio cancels again at every await in the scope (as BaseHTTPMiddleware does on disconnect)
+        with anyio.move_on_after(0.3):
+            async with longpoll.waiter_slot(redis, org, user, time.time()):
+                await anyio.sleep(10)
+        for _ in range(40):
+            if await redis.zcard(key) == 0:
+                break
+            await asyncio.sleep(0.05)
+        # catches: the release itself cancelled, locking the user out until the slot expires
+        assert await redis.zcard(key) == 0
+    finally:
+        await redis.aclose()
+
+
+def test_a_slot_outlives_its_slowest_poll():
+    from app.db.engine import make_engine
+
+    pool = make_engine("postgresql+asyncpg://u:p@localhost/x").pool
+    # After its last deadline check a poll can still wait on three pool checkouts (one read, two to
+    # re-resolve the credential). catches: a slot expiring mid-poll under DB pressure, lifting the cap.
+    assert longpoll._SLOT_TTL >= longpoll.MAX_WAIT + 3 * pool.timeout()  # type: ignore[attr-defined]
