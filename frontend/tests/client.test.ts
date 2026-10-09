@@ -27,6 +27,7 @@ async function failure(p: Promise<unknown>): Promise<ApiError> {
 
 beforeEach(() => window.history.replaceState(null, "", "/decisions?status=pending_votes"));
 afterEach(() => {
+  vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.mocked(goTo).mockReset();
 });
@@ -101,7 +102,6 @@ describe("api client", () => {
     const p = failure(api("/decision-requests"));
     await vi.advanceTimersByTimeAsync(15_000);
     expect(await p).toMatchObject({ status: 0, code: "timeout" });
-    vi.useRealTimers();
   });
 
   it("a caller abort is passed through, not reported as a network error", async () => {
