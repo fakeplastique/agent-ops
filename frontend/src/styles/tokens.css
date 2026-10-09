@@ -113,4 +113,8 @@
 
   --shadow-*: initial;
   --shadow-float: 0 8px 24px rgb(19 20 22 / 0.12);
+
+  /* Hover and press; menus and dialogs use duration-200. */
+  --default-transition-duration: 120ms;
+  --default-transition-timing-function: ease-out;
 }
