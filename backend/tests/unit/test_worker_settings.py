@@ -14,3 +14,8 @@ def test_the_relay_runs_every_second_and_the_timeout_sweep_every_minute():
 def test_job_ids_are_stable_per_event_and_concern():
     assert job_id("e1", "webhooks") == "e1:webhooks" == job_id("e1", "webhooks")
     assert len({job_id("e1", c) for c in CONCERNS}) == len(CONCERNS)
+
+
+def test_the_analytics_consumer_is_registered_under_its_concern():
+    assert "analytics" in CONCERNS
+    assert "analytics" in {f.name for f in WorkerSettings.functions}
