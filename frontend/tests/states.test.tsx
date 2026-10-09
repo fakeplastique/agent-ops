@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { vi } from "vitest";
 
@@ -45,7 +45,7 @@ describe("ReadView (I22: a failed or unfinished read is never shown as empty, an
 
   it("a network error renders Retry and the connection hint, never the empty message", () => {
     view({ status: "error", error: new ApiError(0, "network", "No response from the server") });
-    expect(screen.getByText(/No response from the server/)).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "No response from the server" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
     expect(screen.queryByText(EMPTY)).not.toBeInTheDocument();
   });
@@ -77,13 +77,13 @@ describe("ReadView (I22: a failed or unfinished read is never shown as empty, an
 
   it("401 says the session ended (the client is redirecting), not empty", () => {
     view({ status: "error", error: err(401, "unauthenticated") });
-    expect(screen.getByText(/session ended/i)).toBeInTheDocument();
+    expect(within(screen.getByRole("group")).getByText(/session ended/i)).toBeInTheDocument();
     expect(screen.queryAllByRole("button")).toHaveLength(0);
   });
 
   it("403 names the role needed", () => {
     view({ status: "error", error: err(403, "forbidden") }, { role: "org admin" });
-    expect(screen.getByText("You do not have access to this")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "You do not have access to this" })).toBeInTheDocument();
     expect(screen.getByText(/org admin role/)).toBeInTheDocument();
   });
 
@@ -94,7 +94,7 @@ describe("ReadView (I22: a failed or unfinished read is never shown as empty, an
     a.unmount();
     const b = view({ status: "error", error: new ApiError(404, "not_found", "no such row in this tenant", { id: "x" }) });
     expect(b.container.textContent).toBe(missing);
-    expect(screen.getByText("Not found")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Not found" })).toBeInTheDocument();
   });
 
   it("402 shows what the feature does, the plan needed and the upgrade path", () => {
@@ -127,6 +127,66 @@ describe("ReadView (I22: a failed or unfinished read is never shown as empty, an
     await userEvent.click(screen.getByRole("button", { name: "Retry" }));
     rerender(ui({ status: "success", data: { items: ["refund #12"] }, refetch }));
     expect(screen.getByText("refund #12").closest("[tabindex='-1']")).toHaveFocus();
+  });
+
+  // Spec 8.2: status changes go through one polite live region that exists before the change, outside aria-busy.
+  it("announces every outcome through one persistent polite live region", () => {
+    const ui = (read: Read<Rows>) => (
+      <ReadView read={read} label="Decisions" gate={{ feature: "Analytics", description: "d" }} role="org admin">
+        {(d) => <p>{d.items.join(",")}</p>}
+      </ReadView>
+    );
+    const r = (x: Partial<Read<Rows>>): Read<Rows> => ({ status: "success", refetch: vi.fn(), ...x });
+    const { rerender } = render(ui(r({ status: "pending" })));
+    const live = screen.getByRole("status");
+    expect(live).toHaveAttribute("aria-live", "polite");
+    expect(live).toHaveTextContent("Loading");
+    expect(live.closest("[aria-busy='true']")).toBeNull();
+    const steps: [Partial<Read<Rows>>, string][] = [
+      [{ status: "error", error: err(500) }, "Something went wrong on our side"],
+      [{ status: "error", error: err(403) }, "You do not have access to this"],
+      [{ status: "error", error: err(404) }, "Not found"],
+      [{ status: "error", error: err(402, "plan_feature_required", { details: { required_plan: "pro" } }) }, "Analytics is on the Pro plan"],
+      [{ status: "success", data: { items: ["a"] } }, "Loaded"],
+    ];
+    for (const [read, text] of steps) {
+      rerender(ui(r(read)));
+      expect(screen.getByRole("status")).toBe(live);
+      expect(live).toHaveTextContent(text);
+    }
+    expect(document.querySelectorAll("[aria-live]")).toHaveLength(1);
+  });
+
+  it("names the focus region after the screen", () => {
+    render(
+      <ReadView read={{ status: "success", data: { items: [] }, refetch: vi.fn() }} label="Decisions">
+        {() => <p>x</p>}
+      </ReadView>,
+    );
+    expect(screen.getByRole("group", { name: "Decisions" })).toBeInTheDocument();
+  });
+
+  it("Retry shows it is busy while the refetch runs and ignores another press", async () => {
+    const { read } = view({ status: "error", error: err(500), isFetching: true });
+    const busy = screen.getByRole("button", { name: "Retrying…" });
+    expect(busy).toHaveAttribute("aria-disabled", "true");
+    await userEvent.click(busy);
+    expect(read.refetch).not.toHaveBeenCalled();
+  });
+
+  // A Retry that fails again must not leave a pending focus move for a later background poll to trigger.
+  it("a failed Retry clears the focus hand-off", async () => {
+    const refetch = vi.fn();
+    const ui = (x: Partial<Read<Rows>>) => (
+      <ReadView read={{ status: "error", error: err(500), refetch, ...x }}>{(d) => <p>{d.items.join(",")}</p>}</ReadView>
+    );
+    const { rerender } = render(ui({}));
+    await userEvent.click(screen.getByRole("button", { name: "Retry" }));
+    rerender(ui({ isFetching: true }));
+    rerender(ui({ isFetching: false }));
+    (document.activeElement as HTMLElement).blur();
+    rerender(ui({ status: "success", data: { items: ["polled"] } }));
+    expect(screen.getByText("polled").closest("[tabindex='-1']")).not.toHaveFocus();
   });
 
   it("success with no rows shows the empty sentence and its one action", () => {

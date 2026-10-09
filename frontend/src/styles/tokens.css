@@ -36,13 +36,11 @@
   --measure: 480px;
   --focus-width: 2px;
   --press: 120ms ease-out;
-  --menu: 200ms ease-out;
 }
 
 @media (prefers-reduced-motion: reduce) {
   :root {
     --press: 0ms;
-    --menu: 0ms;
   }
 }
 
@@ -114,7 +112,7 @@
   --shadow-*: initial;
   --shadow-float: 0 8px 24px rgb(19 20 22 / 0.12);
 
-  /* Hover and press; menus and dialogs use duration-200. */
+  /* Hover and press (DESIGN.md: 120ms ease-out). */
   --default-transition-duration: 120ms;
   --default-transition-timing-function: ease-out;
 }
