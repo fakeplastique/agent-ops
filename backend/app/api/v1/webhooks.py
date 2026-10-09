@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Request, Response
 from pydantic import BaseModel, Field, StrictBool
@@ -125,7 +125,7 @@ class DeliveryOut(BaseModel):
     id: uuid.UUID  # also the webhook-id the receiver saw
     event_id: uuid.UUID
     event_type: str
-    status: str  # pending | delivered | dead
+    status: Literal["pending", "delivered", "dead"]
     attempt: int
     next_attempt_at: datetime | None
     last_status_code: int | None

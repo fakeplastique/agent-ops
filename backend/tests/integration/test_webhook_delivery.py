@@ -1,7 +1,9 @@
 """I17 / SC23: webhook delivery is signed, at least once with a stable webhook-id, retried 5 times, tenant-scoped."""
 
+import asyncio
 import json
 import uuid
+from contextlib import asynccontextmanager
 from datetime import timedelta
 
 import pytest
@@ -12,6 +14,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 from app.config import settings
 from app.db.session import tenant_session
+from app.domain.errors import SubscriptionPaused
 from app.services import webhook_security as ws
 from app.services import webhooks
 from app.worker import webhooks as worker
@@ -290,3 +293,125 @@ async def test_the_sweep_sees_ids_only_and_a_row_keeps_its_identity(
     assert sub["id"] == (await fetch(
         owner_engine, "select subscription_id from webhook_deliveries where id = :d", d=delivery
     ))[0][0]  # fmt: skip
+
+
+async def _queued(owner, org, sub, event, at) -> uuid.UUID:
+    """A due delivery row planted directly (as if a worker died before its first send)."""
+    sql = text(
+        "insert into webhook_deliveries (organization_id, subscription_id, event_id, event_type,"
+        " next_attempt_at) values (:o, :s, :e, 'decision.created', :at) returning id"
+    )
+    async with owner.begin() as c:
+        return (await c.execute(sql, {"o": org, "s": sub, "e": event, "at": at})).scalar_one()
+
+
+async def test_a_secret_that_does_not_open_cannot_starve_the_sweep(
+    app_engine, owner_engine, worker_engine
+):
+    # catches: a claim that raises rolling back, so the same poison rows head every batch forever
+    w = await make_world(owner_engine)
+    rx = Receiver()
+    server = await rx.start()
+    bad, good = await subscribe(app_engine, w.org, 8100), await subscribe(app_engine, w.org, 8100)
+    await _exec(  # another row's ciphertext: its AAD names another subscription, so it never opens
+        owner_engine,
+        "update webhook_subscriptions set secret_ciphertext ="
+        " (select secret_ciphertext from webhook_subscriptions where id = :g) where id = :b",
+        g=good["id"], b=bad["id"],
+    )  # fmt: skip
+    t0 = NOW.now()
+    poison = [
+        await _queued(owner_engine, w.org, bad["id"], await emit(app_engine, w.org), t0 - timedelta(minutes=10))
+        for _ in range(4)
+    ]  # fmt: skip
+    healthy = await _queued(
+        owner_engine, w.org, good["id"], await emit(app_engine, w.org), t0 - timedelta(minutes=1)
+    )
+    send = sender({8100: rx})
+    for _ in range(2):  # batch 3 < 4 poison rows: only moving on lets the healthy one through
+        await worker.retry_due(worker_engine, app_engine, NOW, send=send, batch=3)
+    server.close()
+    assert (await _row(owner_engine, healthy))[:2] == ("delivered", 1)
+    for d in poison:
+        assert await _row(owner_engine, d) == (
+            "pending", 1, t0 + timedelta(seconds=30), None, "secret unavailable: SealError"
+        )  # fmt: skip
+    assert len(rx.seen) == 1  # nothing unsigned ever went out
+
+
+async def test_pausing_dead_letters_with_its_reason_and_redeliver_waits_for_resume(
+    app_engine, owner_engine, worker_engine
+):
+    # catches: a paused hook's retries dying as "inactive", and a redeliver that 202s then dies silently
+    w = await make_world(owner_engine)
+    rx = Receiver(statuses=(500,))
+    server = await rx.start()
+    send = sender({8101: rx})
+    sub = await subscribe(app_engine, w.org, 8101)
+    await worker.fan_out(app_engine, w.org, await emit(app_engine, w.org), NOW, send=send)
+    [(delivery,)] = await fetch(
+        owner_engine, "select id from webhook_deliveries where subscription_id = :s", s=sub["id"]
+    )
+    admin = uuid.uuid4()
+
+    async def set_active(on: bool) -> None:
+        async with tenant_session(app_engine, w.org) as s:
+            await webhooks.update_subscription(s, w.org, admin, sub["id"], {"active": on})
+
+    async def redeliver() -> dict:
+        async with tenant_session(app_engine, w.org) as s:
+            return await webhooks.redeliver(s, w.org, admin, sub["id"], delivery, due.now())
+
+    await set_active(False)
+    due = FakeClock(NOW.now() + timedelta(seconds=30))
+    assert await worker.retry_due(worker_engine, app_engine, due, send=send) == 1
+    paused = ("dead", 1, None, 500, "subscription is paused")
+    assert await _row(owner_engine, delivery) == paused and len(rx.seen) == 1  # not sent again
+    with pytest.raises(SubscriptionPaused):
+        await redeliver()
+    assert await _row(owner_engine, delivery) == paused  # the reason is kept, not wiped
+    await set_active(True)
+    rx.statuses = (204,)
+    assert (await redeliver())["status"] == "pending"
+    assert await worker.retry_due(worker_engine, app_engine, due, send=send) == 1
+    server.close()
+    assert (await _row(owner_engine, delivery))[:2] == ("delivered", 1)
+
+
+async def test_one_batch_never_holds_more_sessions_than_the_pool(
+    app_engine, owner_engine, monkeypatch
+):
+    # catches: 50 sends at once queueing on a 5+10 pool until a finish times out and is lost
+    w = await make_world(owner_engine)
+    for _ in range(12):
+        await subscribe(app_engine, w.org, 8102)
+    real, open_now, peak = worker.tenant_session, [0], [0]
+
+    @asynccontextmanager
+    async def counted(engine, org):
+        open_now[0] += 1
+        peak[0] = max(peak[0], open_now[0])
+        try:
+            async with real(engine, org) as s:
+                await asyncio.sleep(0.05)  # a session that takes a moment, as under load
+                yield s
+        finally:
+            open_now[0] -= 1
+
+    async def slow_ok(url, body, headers) -> int:
+        await asyncio.sleep(0.2)
+        return 204
+
+    monkeypatch.setattr(worker, "tenant_session", counted)
+    assert (
+        await worker.fan_out(app_engine, w.org, await emit(app_engine, w.org), NOW, send=slow_ok)
+        == 12
+    )
+    assert 1 < peak[0] <= worker.DB_SLOTS <= 5, peak  # side by side, but within the pool's 5
+    done = await fetch(
+        owner_engine,
+        "select count(*) from webhook_deliveries d join webhook_subscriptions s"
+        " on s.id = d.subscription_id where s.organization_id = :o and d.status = 'delivered'",
+        o=w.org,
+    )
+    assert done == [(12,)]

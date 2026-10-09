@@ -1,7 +1,4 @@
-"""Webhook delivery (S28, D18): at least once, signed per Standard Webhooks, bounded by one deadline per call.
-
-Each delivery row is the `webhook-id`: one per (subscription, event), the same across retries and redelivers.
-DB work happens in short tenant sessions as app_rt; the HTTP call runs between them, never inside one."""
+"""Webhook delivery (S28, D18): the row id is the webhook-id; HTTP runs between tenant sessions, never inside."""
 
 import asyncio
 import json
@@ -30,6 +27,9 @@ MAX_ATTEMPTS = 5
 # Wait after failed attempt n (1-4). After the 5th the row is dead; its lease only covers a lost worker.
 BACKOFF = (30, 120, 900, 3600)
 LEASE = 60  # seconds: longer than DNS (5 s) plus the call (5 s)
+DB_SLOTS = (
+    5  # sessions one batch may hold at once: the engine's pool_size, so a finish never waits it out
+)
 
 _FAN_OUT = text(
     "insert into webhook_deliveries (organization_id, subscription_id, event_id, event_type, next_attempt_at)"
@@ -51,6 +51,7 @@ _START = text(
     " where organization_id = :o and id = :d returning attempt"
 )
 # Conditional on the attempt it belongs to: a stale result never overwrites a newer attempt or a redeliver.
+# The case keeps the claim's backoff only while pending (CHECK: pending <=> next_attempt_at is set).
 _FINISH = text(
     "update webhook_deliveries set status = :st, next_attempt_at = case when :st = 'pending'"
     "  then next_attempt_at end, last_status_code = :code, last_error = :err, updated_at = now()"
@@ -87,41 +88,53 @@ def body(type: str, payload: dict[str, Any], seq: int, at: datetime) -> bytes:
 
 async def _claim(
     engine: AsyncEngine, org: uuid.UUID, delivery: uuid.UUID, now: datetime
-) -> tuple[int, str, bytes, str] | None:
-    """Take the next attempt of a due row: (attempt, url, body, secret), or None when there is nothing to send."""
+) -> tuple[int, str, bytes, str | None, str | None] | None:
+    """(attempt, url, body, secret, error) for a due row, or None when there is nothing to send."""
     async with tenant_session(engine, org) as s:
         row = (await s.execute(_CLAIM, {"o": org, "d": delivery})).mappings().first()
         if row is None or row["status"] != "pending" or row["next_attempt_at"] > now:
             return None
         if row["attempt"] >= MAX_ATTEMPTS or not row["active"]:
-            err = "attempts exhausted" if row["active"] else "subscription is inactive"
+            # Paused: queue nothing (as fan-out does); the admin redelivers after resuming.
+            err = "attempts exhausted" if row["active"] else "subscription is paused"
             await s.execute(_KILL, {"o": org, "d": delivery, "err": err})
             return None
         n = row["attempt"] + 1
         await s.execute(_START, {"o": org, "d": delivery, "next": now + _wait(n)})
-        secret = await subscriptions.load_secret(s, org, row["subscription_id"])
-        return (
-            n,
-            row["url"],
-            body(row["type"], row["payload"], row["seq"], row["created_at"]),
-            secret,
-        )
+        secret, err = None, None
+        # A secret that does not open is a failed attempt: raising would roll the claim back and
+        # leave the row at the head of every batch, starving everything behind it.
+        try:
+            secret = await subscriptions.load_secret(s, org, row["subscription_id"])
+        except Exception as e:  # noqa: BLE001
+            log.error("webhook secret unavailable: %s", type(e).__name__)
+            err = f"secret unavailable: {type(e).__name__}"
+        payload = body(row["type"], row["payload"], row["seq"], row["created_at"])
+        return n, row["url"], payload, secret, err
 
 
 async def deliver(
-    engine: AsyncEngine, org: uuid.UUID, delivery: uuid.UUID, clock: Clock, send: Send = post_pinned
+    engine: AsyncEngine,
+    org: uuid.UUID,
+    delivery: uuid.UUID,
+    clock: Clock,
+    send: Send = post_pinned,
+    slots: asyncio.Semaphore | None = None,
 ) -> str | None:
-    """One attempt at one delivery row. Returns the row's new status, or None if nothing was due."""
+    """One attempt at one delivery row: its new status, or None if nothing was due."""
+    slots = slots or asyncio.Semaphore(DB_SLOTS)
     now = clock.now()
-    claimed = await _claim(engine, org, delivery, now)
+    async with slots:
+        claimed = await _claim(engine, org, delivery, now)
     if claimed is None:
         return None
-    n, url, payload, secret = claimed
-    headers = signed_headers(secret, str(delivery), int(now.timestamp()), payload)
+    n, url, payload, secret, err = claimed
     code: int | None = None
     try:
-        code = await send(url, payload, headers)
-        err = None if 200 <= code < 300 else f"HTTP {code}"
+        if secret is not None:
+            headers = signed_headers(secret, str(delivery), int(now.timestamp()), payload)
+            code = await send(url, payload, headers)
+            err = None if 200 <= code < 300 else f"HTTP {code}"
     except WebhookUrlRefused as e:
         err = f"refused: {e.details['rule']}"
     except TimeoutError:
@@ -136,7 +149,7 @@ async def deliver(
     status = "delivered" if err is None else "dead" if n >= MAX_ATTEMPTS else "pending"
     err = err and err[:200]  # the column's cap
     params = {"o": org, "d": delivery, "n": n, "st": status, "code": code, "err": err}
-    async with tenant_session(engine, org) as s:
+    async with slots, tenant_session(engine, org) as s:
         await s.execute(_FINISH, params)
     return status
 
@@ -144,9 +157,11 @@ async def deliver(
 async def _each(
     engine: AsyncEngine, items: list[tuple[uuid.UUID, uuid.UUID]], clock: Clock, send: Send
 ) -> None:
-    # Side by side: a receiver that hangs costs its own 5 s, never the others'.
+    # Sends side by side (a hanging receiver costs only its own 5 s); DB sessions capped at DB_SLOTS.
+    slots = asyncio.Semaphore(DB_SLOTS)
     results = await asyncio.gather(
-        *(deliver(engine, org, d, clock, send) for org, d in items), return_exceptions=True
+        *(deliver(engine, org, d, clock, send, slots) for org, d in items),
+        return_exceptions=True,
     )
     for r in results:
         if isinstance(r, BaseException):
@@ -156,10 +171,7 @@ async def _each(
 async def fan_out(
     engine: AsyncEngine, org: uuid.UUID, event: uuid.UUID, clock: Clock, send: Send = post_pinned
 ) -> int:
-    """One row per active subscription that wants this event, then the first attempt of each.
-
-    Idempotent on (event, concern): a re-run inserts no row, so it sends nothing; a row left behind by a
-    worker that died before sending is still pending and the retry sweep takes it."""
+    """Rows for the active subscriptions wanting this event, then a first attempt; a re-run inserts none."""
     async with tenant_session(engine, org) as s:
         rows = (await s.execute(_FAN_OUT, {"o": org, "e": event, "now": clock.now()})).all()
     await _each(engine, [(org, r[0]) for r in rows], clock, send)
@@ -174,8 +186,7 @@ async def retry_due(
     *,
     batch: int = 50,
 ) -> int:
-    """Re-send due rows (retries, redelivers, rows a dead worker left). The scan is app_worker, ids only;
-    a row another sweep already took is skipped at its claim."""
+    """Re-send due rows (retries, redelivers, a dead worker's leftovers); the app_worker scan sees ids only."""
     async with scan_engine.connect() as c:
         rows = (await c.execute(_DUE, {"now": clock.now(), "n": batch})).all()
     await _each(work_engine, [(o, d) for o, d in rows], clock, send)

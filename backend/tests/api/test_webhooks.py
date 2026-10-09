@@ -19,7 +19,7 @@ from app.services import webhook_security as ws
 from app.services import webhooks
 from app.worker import webhooks as worker
 from tests.api.harness import agent_auth, user_auth
-from tests.integration.helpers import NOW, fetch, make_world, staff
+from tests.integration.helpers import NOW, _exec, fetch, make_world, staff
 from tests.integration.webhook_harness import answered_204, emit
 from tests.security.test_token_hygiene import whole_database_text
 
@@ -274,6 +274,12 @@ async def test_deliveries_list_and_redeliver(web, app_engine, owner_engine):
     member = await user_auth(app_engine, w.org, await staff(owner_engine, w.org, "manager"))
     assert (await web.client.get(deliveries, headers=member)).status_code == 403
     assert (await web.client.post(again, headers=member)).status_code == 403
+    # Paused: a redeliver is refused (409) instead of a 202 the worker would then kill.
+    await web.client.patch(f"{WH}/{sub['id']}", json={"active": False}, headers=admin)
+    await _exec(owner_engine, "update webhook_deliveries set status='dead', next_attempt_at=null"
+                " where id=:d", d=d["id"])  # fmt: skip
+    r = await web.client.post(again, headers=admin)
+    assert (r.status_code, r.json()["error"]["code"]) == (409, "subscription_paused")
 
 
 async def test_dns_is_resolved_before_any_transaction_opens(web, app_engine, owner_engine):
