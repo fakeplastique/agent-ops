@@ -71,7 +71,14 @@ def _wait(attempt: int) -> timedelta:
 
 
 def body(type: str, payload: dict[str, Any], seq: int, at: datetime) -> bytes:
+    """The Standard Webhooks message. A vote names its verdict only in round 2 (round 1 is blind until
+    `round.revealed`) and never its rationale, whatever the stored event says (spec 4.2 rule 3)."""
     data = dict(payload)
+    if type == "vote.cast":
+        data.pop("rationale", None)
+        if data.get("round") != 2:
+            data.pop("verdict", None)
+            data.pop("confidence", None)
     return json.dumps(
         {"type": type, "timestamp": at.isoformat(), "seq": seq, "data": data},
         separators=(",", ":"),

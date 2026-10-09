@@ -13,7 +13,16 @@ from app.db.session import tenant_session
 from app.services import webhook_security as ws
 from app.services import webhooks
 from app.worker import webhooks as worker
-from tests.integration.helpers import NOW, FakeClock, _exec, fetch, make_world
+from tests.integration.helpers import (
+    NOW,
+    FakeClock,
+    _exec,
+    cast,
+    fetch,
+    make_world,
+    open_request,
+    voters,
+)
 from tests.integration.webhook_harness import Receiver, emit, sender, subscribe
 
 pytestmark = pytest.mark.anyio
@@ -200,3 +209,38 @@ async def test_a_job_that_cannot_reach_the_database_is_retried_not_dropped():
     with pytest.raises(Retry):
         await worker.webhooks(ctx, str(uuid.uuid4()), str(uuid.uuid4()))
     await down.dispose()
+
+
+async def test_round_one_vote_events_carry_session_and_round_only_before_reveal(
+    app_engine, owner_engine
+):
+    # catches: blind verdicts in a webhook
+    w = await make_world(owner_engine)
+    rx = Receiver()
+    server = await rx.start()
+    await subscribe(app_engine, w.org, 8098, events=("vote.cast", "round.revealed"))
+    req = await open_request(app_engine, w)
+    for s in await voters(
+        owner_engine, w, 3
+    ):  # the third vote fills the quorum and reveals round 1
+        await cast(app_engine, w, req, s, verdict="reject", confidence=0.42)
+    # And events that wrongly carry a verdict or rationale: the webhook body still must not.
+    planted = {"decision_request_id": str(req["id"]), "round": 1, "verdict": "reject",
+               "confidence": 0.42, "rationale": "because"}  # fmt: skip
+    await emit(app_engine, w.org, "vote.cast", planted)
+    await emit(app_engine, w.org, "vote.cast", planted | {"round": 2})
+    events = await fetch(
+        owner_engine,
+        "select id from outbox_events where organization_id = :o order by seq",
+        o=w.org,
+    )
+    for (event,) in events:
+        await worker.fan_out(app_engine, w.org, event, NOW, send=sender({8098: rx}))
+    server.close()
+    sent = [json.loads(r.body) for r in rx.seen]
+    assert [m["type"] for m in sent] == ["vote.cast"] * 3 + ["round.revealed"] + ["vote.cast"] * 2
+    for m in sent[:3] + sent[4:5]:
+        assert m["data"]["round"] == 1
+        assert not {"verdict", "confidence", "rationale"} & set(m["data"]), m
+    assert {v["verdict"] for v in sent[3]["data"]["votes"]} == {"reject"}  # revealed: now it may
+    assert (sent[5]["data"]["verdict"], "rationale" in sent[5]["data"]) == ("reject", False)
