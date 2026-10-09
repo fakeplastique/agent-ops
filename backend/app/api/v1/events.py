@@ -5,11 +5,12 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Header, Query, Request
 from pydantic import BaseModel
 
-from app.api.deps import ActorDep, ClockDep, EngineDep, RedisDep, get_actor
+from app.api.deps import ActorDep, ClockDep, EngineDep, RedisDep, session_user
 from app.authz.matrix import Role
 from app.authz.principals import UserPrincipal
-from app.domain.errors import Forbidden, NotFoundError, Unauthenticated
-from app.realtime.longpoll import MAX_WAIT, poll
+from app.authz.resolver import resolve_bearer
+from app.domain.errors import Forbidden, InvalidInput, NotFoundError, Unauthenticated
+from app.realtime.longpoll import MAX_WAIT, poll, waiter_slot
 
 router = APIRouter(prefix="/events", tags=["realtime"])
 
@@ -23,11 +24,20 @@ class EventOut(BaseModel):
 
 
 class FeedOut(BaseModel):
-    organization_id: (
-        uuid.UUID
-    )  # seq is per organization: a client resets its cursor when this changes
+    # seq is per organization: a client resets its cursor when this changes
+    organization_id: uuid.UUID
     events: list[EventOut]
     after: int  # the cursor for the next poll (past dropped events too)
+
+
+_MAX_SEQ = 2**63 - 1  # bigint
+
+
+def _cursor(raw: str) -> int:
+    """Plain ASCII digits only: int() alone would also take "1_0", "+3" and " 3"."""
+    if not (raw.isascii() and raw.isdigit()) or len(raw) > 19 or int(raw) > _MAX_SEQ:
+        raise InvalidInput("after must be a sequence number (digits only)")
+    return int(raw)
 
 
 @router.get("", response_model=FeedOut)
@@ -37,7 +47,7 @@ async def long_poll(
     engine: EngineDep,
     redis: RedisDep,
     clock: ClockDep,
-    after: Annotated[int, Query(ge=0, le=2**63 - 1)] = 0,
+    after: Annotated[str, Query(description="Last seq seen (digits only)")] = "0",
     wait: Annotated[
         int, Query(ge=0, le=MAX_WAIT, description="Seconds to wait for a first event")
     ] = MAX_WAIT,
@@ -51,9 +61,13 @@ async def long_poll(
     org = actor.organization_id
 
     async def recheck() -> Role:
-        # Same resolver as the request itself; a lapse (or a switch to another org) is this org's 404.
+        # The resolvers behind ActorDep, minus the login-failure counter: a lapse is no failed login.
+        # A lapse (or a switch to another org) is this org's 404.
         try:
-            now = await get_actor(request, engine, redis, clock, authorization)
+            if authorization is not None:
+                now = (await resolve_bearer(engine, authorization)).principal
+            else:
+                now = await session_user(request, engine, clock)
         except (Unauthenticated, Forbidden):
             raise NotFoundError from None
         if not isinstance(now, UserPrincipal) or now.user_id != actor.user_id:
@@ -62,5 +76,9 @@ async def long_poll(
             raise NotFoundError
         return now.role
 
-    events, cursor = await poll(engine, org, after, wait, limit, recheck)
+    cursor = _cursor(after)
+    async with waiter_slot(redis, org, actor.user_id, clock.now().timestamp()):
+        events, cursor = await poll(
+            engine, org, cursor, wait, limit, recheck, request.is_disconnected
+        )
     return FeedOut(organization_id=org, events=[EventOut(**e) for e in events], after=cursor)

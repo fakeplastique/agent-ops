@@ -4,14 +4,20 @@ import time
 import uuid
 
 import pytest
+from redis.asyncio import Redis
 from sqlalchemy import text
+from starlette.requests import Request
 
+from app.api import deps
 from app.authz.matrix import Role
+from app.config import settings
 from app.db.session import tenant_session
+from app.main import app
 from app.realtime import longpoll
 from app.realtime.projection import project
 from app.services import outbox
 from tests.api.harness import agent_auth, user_auth
+from tests.conftest import TEST_REDIS
 
 from .helpers import cast, fetch, make_member, make_org, make_world, open_request, staff, voters
 
@@ -31,7 +37,9 @@ async def plant(app_engine, org, type_, payload) -> int:
         return await outbox.emit(s, org, type_, payload)
 
 
-async def test_member_never_sees_events_of_requests_they_cannot_read(web, app_engine, owner_engine):
+async def test_member_sees_only_own_org_events_and_each_names_a_readable_request(
+    web, app_engine, owner_engine
+):
     a = await make_world(owner_engine)
     b = await make_world(owner_engine)
     for w in (a, b):
@@ -90,6 +98,26 @@ async def test_unknown_event_types_are_dropped_and_the_cursor_moves_past_them(
     body = (await poll(web, h)).json()
     assert "SECRET" not in str(body)  # catches: a new type or field leaking by default
     assert [e["type"] for e in body["events"]] == ["plan.changed"] and body["after"] == seq
+
+
+async def test_a_non_object_payload_is_skipped_and_the_cursor_moves_past_it(
+    web, app_engine, owner_engine
+):
+    org, h = await _pat_in_new_org(app_engine, owner_engine)
+    for junk in ("x", ["id"], 7, None):
+        await plant(app_engine, org, "plan.changed", junk)
+    seq = await plant(app_engine, org, "plan.changed", {"organization_id": str(org), "to": "pro"})
+    res = await poll(web, h)
+    # catches: one bad row 500ing every later poll and pinning the cursor forever
+    assert res.status_code == 200, res.text
+    assert [e["seq"] for e in res.json()["events"]] == [seq] and res.json()["after"] == seq
+
+
+def test_projection_covers_exactly_the_emitted_event_types():
+    from app.realtime.projection import TYPES
+    from app.services.webhooks import EVENT_TYPES
+
+    assert TYPES == EVENT_TYPES  # catches: a new emitted type silently missing from the feed
 
 
 def test_projection_strips_blind_fields_for_every_role_and_keeps_round_two():
@@ -169,7 +197,8 @@ async def test_wait_bounded_25s_and_released_on_new_event(
 ):
     org, h = await _pat_in_new_org(app_engine, owner_engine)
     bad = ({"wait": "26"}, {"wait": "-1"}, {"after": "-1"}, {"after": str(2**63)},
-           {"limit": "0"}, {"limit": "101"}, {"after": "x"})  # fmt: skip
+           {"limit": "0"}, {"limit": "101"}, {"after": "x"},
+           {"after": "1_0"}, {"after": "+3"}, {"after": " 3"}, {"after": "3 "}, {"after": ""})  # fmt: skip
     for params in bad:
         assert (await web.client.get(EVENTS, params=params, headers=h)).status_code == 422, params
     t = time.monotonic()
@@ -186,13 +215,17 @@ async def test_wait_bounded_25s_and_released_on_new_event(
     monkeypatch.setattr(longpoll, "MAX_WAIT", 0.2)
     t = time.monotonic()
     events, cursor = await asyncio.wait_for(
-        longpoll.poll(app_engine, org, seq, 1000, 10, _never), 3
+        longpoll.poll(app_engine, org, seq, 1000, 10, _never, _present), 3
     )
     assert (events, cursor) == ([], seq) and time.monotonic() - t < 2
 
 
 async def _never() -> Role:
     raise AssertionError("no batch, no recheck")
+
+
+async def _present() -> bool:
+    return False
 
 
 async def _lapse_mid_poll(web, app_engine, owner_engine, org, headers, lapse_sql, **params):
@@ -262,3 +295,71 @@ async def test_switching_organization_mid_poll_ends_the_old_feed(web, app_engine
     # catches: an in-flight poll still streaming the organization the user just left the view of
     assert res.status_code == 404 and "x-AFTER" not in res.text
     assert (await poll(web)).json()["organization_id"] == str(two)
+
+
+async def test_a_lapse_mid_poll_is_not_counted_as_a_failed_login(
+    web, app_engine, owner_engine, monkeypatch
+):
+    monkeypatch.setattr(settings, "auth_failures_per_minute", 0)  # one counted failure would 429
+    org, h = await _pat_in_new_org(app_engine, owner_engine)
+    revoke = "update personal_access_tokens set revoked_at = now() where organization_id=:o"
+    res = await _lapse_mid_poll(web, app_engine, owner_engine, org, h, revoke, o=org)
+    # catches: the recheck going through the login-failure limiter (429 instead of the lapse's 404)
+    assert res.status_code == 404, res.text
+
+
+async def test_a_disconnected_client_releases_the_poll(web, app_engine, owner_engine, monkeypatch):
+    _org, h = await _pat_in_new_org(app_engine, owner_engine)
+
+    async def gone(self) -> bool:
+        return True
+
+    monkeypatch.setattr(Request, "is_disconnected", gone)
+    # catches: a waiter that keeps querying for 25 s after its client went away
+    res = await asyncio.wait_for(poll(web, h, wait=20), 5)
+    assert res.json()["events"] == []
+
+
+async def _until_waiting(redis, key: str, n: int) -> None:
+    for _ in range(200):
+        if await redis.zcard(key) >= n:
+            return
+        await asyncio.sleep(0.05)
+    raise AssertionError(f"never saw {n} waiters")
+
+
+async def test_concurrent_waiters_per_user_are_capped(web, app_engine, owner_engine, monkeypatch):
+    monkeypatch.setattr(longpoll, "MAX_WAITERS", 2)
+    org = await make_org(owner_engine)
+    user, other = await staff(owner_engine, org, "member"), await staff(owner_engine, org, "member")
+    h, ho = await user_auth(app_engine, org, user), await user_auth(app_engine, org, other)
+    redis = Redis.from_url(TEST_REDIS)
+    key = longpoll.waiter_key(org, user)
+    try:
+        held = [asyncio.create_task(poll(web, h, wait=20)) for _ in range(2)]
+        await _until_waiting(redis, key, 2)
+        over = await poll(web, h, wait=20)
+        # catches: one credential opening unbounded 25 s waiters that each query twice a second
+        assert over.status_code == 429 and 1 <= int(over.headers["Retry-After"]) <= 30
+        assert (await poll(web, ho)).status_code == 200  # another user is not affected
+        await plant(app_engine, org, "plan.changed", {"organization_id": str(org), "to": "pro"})
+        assert [r.status_code for r in await asyncio.gather(*held)] == [200, 200]
+        assert await redis.zcard(key) == 0  # every slot released
+        assert (await poll(web, h)).status_code == 200
+        # A slot whose holder crashed frees itself at its own expiry.
+        await redis.zadd(key, {"dead-1": 1.0, "dead-2": 2.0})
+        assert (await poll(web, h)).status_code == 200
+    finally:
+        await redis.aclose()
+
+
+async def test_waiter_cap_store_down_is_503_not_unbounded(web, app_engine, owner_engine):
+    _org, h = await _pat_in_new_org(app_engine, owner_engine)
+    down = Redis.from_url("redis://localhost:1/0")
+    app.dependency_overrides[deps.get_redis] = lambda: down
+    try:
+        res = await poll(web, h, wait=20)
+    finally:
+        await down.aclose()
+    # catches: a limiter outage lifting the cap (fails closed like the write limiter)
+    assert res.status_code == 503 and res.json()["error"]["code"] == "rate_limiter_unavailable"
