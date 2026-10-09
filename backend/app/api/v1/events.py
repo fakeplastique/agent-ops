@@ -56,10 +56,9 @@ async def long_poll(
             now = await get_actor(request, engine, redis, clock, authorization)
         except (Unauthenticated, Forbidden):
             raise NotFoundError from None
-        if not isinstance(now, UserPrincipal) or (now.user_id, now.organization_id) != (
-            actor.user_id,
-            org,
-        ):
+        if not isinstance(now, UserPrincipal) or now.user_id != actor.user_id:
+            raise NotFoundError
+        if now.organization_id != org:
             raise NotFoundError
         return now.role
 

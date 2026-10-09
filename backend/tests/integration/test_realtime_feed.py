@@ -4,6 +4,7 @@ import time
 import uuid
 
 import pytest
+from sqlalchemy import text
 
 from app.authz.matrix import Role
 from app.db.session import tenant_session
@@ -192,3 +193,72 @@ async def test_wait_bounded_25s_and_released_on_new_event(
 
 async def _never() -> Role:
     raise AssertionError("no batch, no recheck")
+
+
+async def _lapse_mid_poll(web, app_engine, owner_engine, org, headers, lapse_sql, **params):
+    """Start a waiting poll, run `lapse_sql`, then emit: the in-flight poll must not deliver."""
+    polling, real = asyncio.Event(), longpoll.read_after
+
+    async def spy(*args):
+        polling.set()  # the request passed auth and is inside its wait loop
+        return await real(*args)
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(longpoll, "read_after", spy)
+        waiting = asyncio.create_task(poll(web, headers, after=0, wait=10))
+        await asyncio.wait_for(polling.wait(), 10)
+    async with owner_engine.begin() as c:
+        await c.execute(text(lapse_sql), params)
+    await plant(app_engine, org, "plan.changed", {"organization_id": str(org), "to": "x-AFTER"})
+    return await waiting
+
+
+async def test_membership_removed_mid_poll_next_poll_401_or_404(web, app_engine, owner_engine):
+    org = await make_org(owner_engine)
+    await staff(owner_engine, org, "org_admin")  # someone stays
+    user = await staff(owner_engine, org, "member")
+    h = await user_auth(app_engine, org, user)
+    gone = "delete from memberships where organization_id=:o and user_id=:u"
+    res = await _lapse_mid_poll(web, app_engine, owner_engine, org, h, gone, o=org, u=user)
+    # catches: the feed outliving access (in flight: 404 and nothing; the PAT died with the membership)
+    assert res.status_code == 404 and "x-AFTER" not in res.text
+    assert (await poll(web, h)).status_code == 401
+
+
+async def test_pat_revoked_mid_poll_delivers_nothing(web, app_engine, owner_engine):
+    org, h = await _pat_in_new_org(app_engine, owner_engine)
+    revoke = "update personal_access_tokens set revoked_at = now() where organization_id=:o"
+    res = await _lapse_mid_poll(web, app_engine, owner_engine, org, h, revoke, o=org)
+    assert res.status_code == 404 and "x-AFTER" not in res.text
+    assert (await poll(web, h)).status_code == 401
+
+
+async def test_cookie_member_removed_mid_poll_delivers_nothing(web, app_engine, owner_engine):
+    org = await make_org(owner_engine)
+    await staff(owner_engine, org, "org_admin")
+    email = f"{uuid.uuid4()}@x.test"
+    await web.login(email)
+    user = (await fetch(owner_engine, "select id from users where email=:e", e=email))[0][0]
+    await make_member(owner_engine, org, user, "member")
+    await web.post("/api/v1/auth/organization", json={"organization_id": str(org)})
+    gone = "delete from memberships where organization_id=:o and user_id=:u"
+    res = await _lapse_mid_poll(web, app_engine, owner_engine, org, {}, gone, o=org, u=user)
+    assert res.status_code == 404 and "x-AFTER" not in res.text
+    nxt = await poll(web)
+    # The session survives; its selected organization no longer resolves (deps.session_user).
+    assert nxt.status_code == 403 and "x-AFTER" not in nxt.text
+
+
+async def test_switching_organization_mid_poll_ends_the_old_feed(web, app_engine, owner_engine):
+    one, two = await make_org(owner_engine), await make_org(owner_engine)
+    email = f"{uuid.uuid4()}@x.test"
+    await web.login(email)
+    user = (await fetch(owner_engine, "select id from users where email=:e", e=email))[0][0]
+    for org in (one, two):
+        await make_member(owner_engine, org, user, "member")
+    await web.post("/api/v1/auth/organization", json={"organization_id": str(one)})
+    switch = "update web_sessions set selected_organization_id=:t where user_id=:u"
+    res = await _lapse_mid_poll(web, app_engine, owner_engine, one, {}, switch, t=two, u=user)
+    # catches: an in-flight poll still streaming the organization the user just left the view of
+    assert res.status_code == 404 and "x-AFTER" not in res.text
+    assert (await poll(web)).json()["organization_id"] == str(two)
