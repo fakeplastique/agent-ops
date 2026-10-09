@@ -1,9 +1,13 @@
+import asyncio
+import random
+import time
 import uuid
 
 import pytest
 
 from app.authz.matrix import Role
 from app.db.session import tenant_session
+from app.realtime import longpoll
 from app.realtime.projection import project
 from app.services import outbox
 from tests.api.harness import agent_auth, user_auth
@@ -104,3 +108,87 @@ def test_projection_strips_blind_fields_for_every_role_and_keeps_round_two():
     out = project("round.revealed", revealed, Role.MEMBER)
     assert out is not None and out["votes"] == [{"session_id": "s", "verdict": "approve", "confidence": 0.9}]  # fmt: skip
     assert project("nope", {}, Role.ORG_ADMIN) is None
+
+
+async def _pat_in_new_org(app_engine, owner_engine, role="member"):
+    org = await make_org(owner_engine)
+    return org, await user_auth(app_engine, org, await staff(owner_engine, org, role))
+
+
+async def test_after_cursor_replays_gapless_in_seq_order_under_concurrent_commits(
+    web, app_engine, owner_engine
+):
+    org, h = await _pat_in_new_org(app_engine, owner_engine)
+    n = 12
+    committed = n - n // 4  # every fourth writer rolls back
+
+    async def writer(i: int) -> None:
+        try:
+            async with tenant_session(app_engine, org) as s:
+                await outbox.emit(
+                    s, org, "plan.changed", {"organization_id": str(org), "to": str(i)}
+                )
+                await asyncio.sleep(random.uniform(0, 0.05))  # hold the counter lock a while
+                if i % 4 == 0:
+                    raise RuntimeError("rolled back")  # a rolled-back emit must leave no hole
+        except RuntimeError:
+            pass
+
+    async def reader() -> list[int]:
+        seen, after = [], 0
+        while len(seen) < committed:
+            body = (await poll(web, h, after=after, wait=1, limit="3")).json()
+            seen += [e["seq"] for e in body["events"]]
+            after = body["after"]
+        return seen
+
+    read = asyncio.create_task(asyncio.wait_for(reader(), 30))
+    await asyncio.gather(*(writer(i) for i in range(1, n + 1)))
+    # catches: a gap or reorder when a lower seq commits later, or a page boundary skipping one
+    assert await read == list(range(1, committed + 1))
+    for c in range(committed + 1):  # replay from every cursor
+        body = (await poll(web, h, after=c)).json()
+        assert [e["seq"] for e in body["events"]] == list(range(c + 1, committed + 1)), c
+
+
+async def test_duplicate_delivery_is_the_same_seq(web, app_engine, owner_engine):
+    org, h = await _pat_in_new_org(app_engine, owner_engine)
+    for i in range(3):
+        await plant(app_engine, org, "plan.changed", {"organization_id": str(org), "to": str(i)})
+    first = (await poll(web, h)).json()["events"]
+    again = (await poll(web, h)).json()["events"]
+    overlap = (await poll(web, h, after=1)).json()["events"]
+    # catches: clients unable to de-duplicate (a re-read names the same event the same way)
+    assert first == again and overlap == first[1:]
+    assert [e["seq"] for e in first] == [1, 2, 3] and len({e["id"] for e in first}) == 3
+
+
+async def test_wait_bounded_25s_and_released_on_new_event(
+    web, app_engine, owner_engine, monkeypatch
+):
+    org, h = await _pat_in_new_org(app_engine, owner_engine)
+    bad = ({"wait": "26"}, {"wait": "-1"}, {"after": "-1"}, {"after": str(2**63)},
+           {"limit": "0"}, {"limit": "101"}, {"after": "x"})  # fmt: skip
+    for params in bad:
+        assert (await web.client.get(EVENTS, params=params, headers=h)).status_code == 422, params
+    t = time.monotonic()
+    body = (await poll(web, h, after=0, wait=1)).json()
+    assert body["events"] == [] and body["after"] == 0 and 0.9 <= time.monotonic() - t < 3
+    # catches: stuck connections (released by the first event, not by the end of the wait)
+    t = time.monotonic()
+    waiting = asyncio.create_task(poll(web, h, after=0, wait=20))
+    await asyncio.sleep(0.3)
+    seq = await plant(app_engine, org, "plan.changed", {"organization_id": str(org), "to": "pro"})
+    body = (await waiting).json()
+    assert [e["seq"] for e in body["events"]] == [seq] and time.monotonic() - t < 3
+    # The cap holds inside the loop too, whatever a caller passes.
+    monkeypatch.setattr(longpoll, "MAX_WAIT", 0.2)
+    t = time.monotonic()
+    events, cursor = await asyncio.wait_for(
+        longpoll.poll(app_engine, org, seq, 1000, 10, _never), 3
+    )
+    assert (events, cursor) == ([], seq) and time.monotonic() - t < 2
+
+
+async def _never() -> Role:
+    raise AssertionError("no batch, no recheck")
