@@ -20,7 +20,7 @@ from app.services import webhooks
 from app.worker import webhooks as worker
 from tests.api.harness import agent_auth, user_auth
 from tests.integration.helpers import NOW, fetch, make_world, staff
-from tests.integration.webhook_harness import emit
+from tests.integration.webhook_harness import answered_204, emit
 from tests.security.test_token_hygiene import whole_database_text
 
 pytestmark = pytest.mark.anyio
@@ -239,10 +239,6 @@ async def test_two_concurrent_creates_cannot_both_pass_the_cap(
         owner_engine, "select count(*) from webhook_subscriptions where organization_id=:o", o=w.org
     )
     assert rows == [(1,)]
-
-
-async def answered_204(url, body, headers) -> int:
-    return 204
 
 
 async def test_deliveries_list_and_redeliver(web, app_engine, owner_engine):

@@ -20,6 +20,11 @@ async def public_dns(host: str, port: int) -> list[str]:
     return [PUBLIC]
 
 
+async def answered_204(url, body, headers) -> int:
+    """A send that never touches the network: every receiver says 204."""
+    return 204
+
+
 class Routed(httpcore2.AsyncNetworkBackend):
     """post_pinned dials the checked public IP; this carries it to the local receiver named by the URL's port."""
 

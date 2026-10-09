@@ -128,12 +128,13 @@ async def deliver(
         err = "timeout"
     except (httpx2.HTTPError, OSError) as e:
         err = f"connection failed: {type(e).__name__}"
-    except (
-        Exception
-    ) as e:  # still an attempt: record it, or the row waits out its lease unexplained
-        log.exception("webhook send failed")
+    # Still an attempt: record it, or the row waits out its lease unexplained. Type name only:
+    # an exception's text may carry the URL, and a URL may carry the receiver's token.
+    except Exception as e:  # noqa: BLE001
+        log.error("webhook send failed: %s", type(e).__name__)
         err = f"failed: {type(e).__name__}"
     status = "delivered" if err is None else "dead" if n >= MAX_ATTEMPTS else "pending"
+    err = err and err[:200]  # the column's cap
     params = {"o": org, "d": delivery, "n": n, "st": status, "code": code, "err": err}
     async with tenant_session(engine, org) as s:
         await s.execute(_FINISH, params)
@@ -149,7 +150,7 @@ async def _each(
     )
     for r in results:
         if isinstance(r, BaseException):
-            log.error("webhook delivery failed", exc_info=r)
+            log.error("webhook delivery failed: %s", type(r).__name__)
 
 
 async def fan_out(
@@ -189,7 +190,7 @@ async def webhooks(ctx: dict[str, Any], organization_id: str, event_id: str) -> 
         )
     except Exception as e:
         # The event is already stamped published: a failed fan-out must run again (arq max_tries bounds it).
-        log.exception("webhook fan-out failed")
+        log.error("webhook fan-out failed: %s", type(e).__name__)
         raise Retry(defer=10 * ctx.get("job_try", 1)) from e
 
 

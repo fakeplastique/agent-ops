@@ -12,7 +12,6 @@ from app.services.tokens import create_pat
 from app.services.webhooks import create_subscription
 from app.worker.webhooks import fan_out
 from tests.api.harness import agent_auth
-from tests.api.test_webhooks import answered_204
 from tests.integration.helpers import (
     LEVELS3,
     NOW,
@@ -27,7 +26,7 @@ from tests.integration.helpers import (
     voters,
 )
 from tests.integration.web_harness import ORIGIN
-from tests.integration.webhook_harness import emit
+from tests.integration.webhook_harness import answered_204, emit
 
 from .harness import ROUTES, api_routes
 
