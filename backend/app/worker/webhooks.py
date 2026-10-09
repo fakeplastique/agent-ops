@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 import httpx2
+from arq.worker import Retry
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
@@ -54,6 +55,10 @@ _FINISH = text(
     "update webhook_deliveries set status = :st, next_attempt_at = case when :st = 'pending'"
     "  then next_attempt_at end, last_status_code = :code, last_error = :err, updated_at = now()"
     " where organization_id = :o and id = :d and attempt = :n and status = 'pending'"
+)
+_DUE = text(
+    "select organization_id, id from webhook_deliveries where status = 'pending'"
+    " and next_attempt_at <= :now order by next_attempt_at limit :n"
 )
 _KILL = text(
     "update webhook_deliveries set status = 'dead', next_attempt_at = null, last_error = :err,"
@@ -116,6 +121,11 @@ async def deliver(
         err = "timeout"
     except (httpx2.HTTPError, OSError) as e:
         err = f"connection failed: {type(e).__name__}"
+    except (
+        Exception
+    ) as e:  # still an attempt: record it, or the row waits out its lease unexplained
+        log.exception("webhook send failed")
+        err = f"failed: {type(e).__name__}"
     status = "delivered" if err is None else "dead" if n >= MAX_ATTEMPTS else "pending"
     params = {"o": org, "d": delivery, "n": n, "st": status, "code": code, "err": err}
     async with tenant_session(engine, org) as s:
@@ -148,8 +158,33 @@ async def fan_out(
     return len(rows)
 
 
+async def retry_due(
+    scan_engine: AsyncEngine,
+    work_engine: AsyncEngine,
+    clock: Clock,
+    send: Send = post_pinned,
+    *,
+    batch: int = 50,
+) -> int:
+    """Re-send due rows (retries, redelivers, rows a dead worker left). The scan is app_worker, ids only;
+    a row another sweep already took is skipped at its claim."""
+    async with scan_engine.connect() as c:
+        rows = (await c.execute(_DUE, {"now": clock.now(), "n": batch})).all()
+    await _each(work_engine, [(o, d) for o, d in rows], clock, send)
+    return len(rows)
+
+
 async def webhooks(ctx: dict[str, Any], organization_id: str, event_id: str) -> int:
     """The arq consumer the relay enqueues as `webhooks` (registry.py)."""
-    return await fan_out(
-        ctx["work_engine"], uuid.UUID(organization_id), uuid.UUID(event_id), ctx["clock"]
-    )
+    try:
+        return await fan_out(
+            ctx["work_engine"], uuid.UUID(organization_id), uuid.UUID(event_id), ctx["clock"]
+        )
+    except Exception as e:
+        # The event is already stamped published: a failed fan-out must run again (arq max_tries bounds it).
+        log.exception("webhook fan-out failed")
+        raise Retry(defer=10 * ctx.get("job_try", 1)) from e
+
+
+async def webhook_retries_job(ctx: dict[str, Any]) -> int:
+    return await retry_due(ctx["scan_engine"], ctx["work_engine"], ctx["clock"])

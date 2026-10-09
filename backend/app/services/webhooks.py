@@ -4,6 +4,7 @@ The plaintext secret leaves only in the create and rotate replies; nothing here 
 
 import uuid
 from collections.abc import Iterable
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy import text
@@ -136,6 +137,57 @@ async def delete_subscription(
     if (await s.execute(_DELETE, {"o": org, "i": sub})).first() is None:
         raise NotFoundError
     await audit.record(s, org, "webhook_subscription", sub, "deleted", "user", actor)
+
+
+_DCOLS = (
+    "id, event_id, event_type, status, attempt, next_attempt_at, last_status_code, last_error,"
+    " created_at, updated_at"
+)
+_DELIVERIES = text(
+    f"select {_DCOLS}, count(*) over () as total from webhook_deliveries"
+    " where organization_id = :o and subscription_id = :s"
+    " order by created_at desc, id offset :skip limit :limit"
+)
+_DELIVERY = text(
+    f"select {_DCOLS} from webhook_deliveries"
+    " where organization_id = :o and subscription_id = :s and id = :d"
+)
+# Same row, so the same webhook-id; a pending row is already queued and is left as it is.
+_REDELIVER = text(
+    "update webhook_deliveries set status = 'pending', attempt = 0, next_attempt_at = :now,"
+    " last_status_code = null, last_error = null, updated_at = now()"
+    " where organization_id = :o and subscription_id = :s and id = :d and status <> 'pending'"
+    " returning id"
+)
+
+
+async def list_deliveries(
+    s: AsyncSession, org: uuid.UUID, sub: uuid.UUID, skip: int, limit: int
+) -> tuple[list[dict], int]:
+    await get_subscription(
+        s, org, sub
+    )  # 404 for a foreign or deleted subscription, not an empty page
+    params = {"o": org, "s": sub, "skip": skip, "limit": limit}
+    rows = (await s.execute(_DELIVERIES, params)).mappings().all()
+    return [dict(r) for r in rows], (rows[0]["total"] if rows else 0)
+
+
+async def redeliver(
+    s: AsyncSession,
+    org: uuid.UUID,
+    actor: uuid.UUID,
+    sub: uuid.UUID,
+    delivery: uuid.UUID,
+    now: datetime,
+) -> dict:
+    """Queue a finished delivery again (5 fresh attempts); the retry sweep sends it, not this call."""
+    params = {"o": org, "s": sub, "d": delivery, "now": now}
+    if (await s.execute(_REDELIVER, params)).first() is not None:
+        await audit.record(s, org, "webhook_delivery", delivery, "redelivered", "user", actor)
+    row = (await s.execute(_DELIVERY, params)).mappings().first()
+    if row is None:
+        raise NotFoundError
+    return dict(row)
 
 
 async def load_secret(s: AsyncSession, org: uuid.UUID, sub: uuid.UUID) -> str:

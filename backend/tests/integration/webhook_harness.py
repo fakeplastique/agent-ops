@@ -50,6 +50,7 @@ class Receiver:
 
     behave: str = "ok"
     statuses: tuple[int, ...] = (204,)
+    reply: bytes = b""  # the response body (which must never reach the delivery log)
     seen: list[Seen] = field(default_factory=list)
     sent: int = 0  # body bytes a `huge` receiver got out before the client hung up
     port: int = 0
@@ -79,7 +80,8 @@ class Receiver:
                     self.sent += len(chunk)
             else:
                 status = self.statuses[min(len(self.seen) - 1, len(self.statuses) - 1)]
-                writer.write(f"HTTP/1.1 {status} X\r\nContent-Length: 0\r\n\r\n".encode())
+                head = f"HTTP/1.1 {status} X\r\nContent-Length: {len(self.reply)}\r\n\r\n"
+                writer.write(head.encode() + self.reply)
                 await writer.drain()
             gone.cancel()
         except (ConnectionError, asyncio.IncompleteReadError):
