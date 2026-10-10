@@ -29,10 +29,12 @@ images() {
   local rc=0 prod="docker compose --profile prod"
   # A lane builds and runs its own stack (random host ports) so lanes never share containers.
   [ -z "$LANE" ] || { prod="docker compose -p webtech-gate-$LANE --profile prod"; export PG_PUBLISH=5432 REDIS_PUBLISH=6379; }
-  $prod build && $prod up -d --wait api web || rc=1
-  # Railway's pre-deploy command: the image itself must be able to migrate as the owner.
-  $prod run --rm --no-deps -e MIGRATE_DATABASE_URL=postgresql://app:app@postgres:5432/agent_ops \
+  $prod build || rc=1
+  # Railway's pre-deploy command: the image itself must be able to migrate as the owner (it also creates
+  # app_rt, which a lane's fresh postgres lacks, so it runs before the api starts).
+  $prod up -d --wait postgres redis && $prod run --rm --no-deps -e MIGRATE_DATABASE_URL=postgresql://app:app@postgres:5432/agent_ops \
     api scripts/migrate.sh || { echo "migrate.sh fails inside the api image"; rc=1; }
+  $prod up -d --wait api web || rc=1
   for s in api web; do
     [ "$($prod exec -T $s id -u 2>/dev/null)" != 0 ] || { echo "$s runs as root"; rc=1; }
   done
