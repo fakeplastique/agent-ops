@@ -1,5 +1,7 @@
-/* Source of truth: DESIGN.md. Components use these variables only. */
+/* Source of truth: DESIGN.md. Literals live here only; @theme maps them to Tailwind utilities. */
 :root {
+  color-scheme: light;
+
   --ground: #eef2f5;
   --surface: #ffffff;
   --raised: #f4f6f8;
@@ -13,18 +15,17 @@
   --positive: #1e7b4f;
   --negative: #c4242a;
   --warning: #92400e;
+  --chart-1: #1b6c80;
+  --chart-2: #2f70bb;
+  --chart-3: #a86f0c;
   --pill-positive-bg: #dcfae5;
   --pill-positive-ink: #04250e;
   --pill-negative-bg: #ffedea;
   --pill-negative-ink: #831c1e;
+  --pill-warning-bg: #fffbeb;
+  --pill-warning-ink: #92400e;
   --pill-neutral-bg: #e6eaed;
   --pill-neutral-ink: #353736;
-
-  --font-sans: "IBM Plex Sans", system-ui, sans-serif;
-  --text-title: 22px;
-  --text-section: 16px;
-  --text-body: 14px;
-  --text-small: 12px;
 
   --space-1: 4px;
   --space-2: 8px;
@@ -32,15 +33,8 @@
   --space-4: 16px;
   --space-6: 24px;
   --space-half: 2px;
-  --control-height: 32px;
-  --row-height: 48px;
   --measure: 480px;
   --focus-width: 2px;
-  --sheet-inset: 8px;
-  --radius-sheet: 16px;
-  --radius-card: 8px;
-  --radius-control: 6px;
-  --radius-pill: 9999px;
   --press: 120ms ease-out;
 }
 
@@ -48,4 +42,77 @@
   :root {
     --press: 0ms;
   }
+}
+
+/* Colours keep their DESIGN.md names above; utilities read them (bg-ground, text-muted). */
+@theme inline {
+  --color-*: initial;
+  --color-ground: var(--ground);
+  --color-surface: var(--surface);
+  --color-raised: var(--raised);
+  --color-active: var(--active);
+  --color-border: var(--border);
+  --color-rule: var(--rule);
+  --color-control: var(--control);
+  --color-text: var(--text);
+  --color-muted: var(--muted);
+  --color-accent: var(--accent);
+  --color-positive: var(--positive);
+  --color-negative: var(--negative);
+  --color-warning: var(--warning);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-pill-positive-bg: var(--pill-positive-bg);
+  --color-pill-positive-ink: var(--pill-positive-ink);
+  --color-pill-negative-bg: var(--pill-negative-bg);
+  --color-pill-negative-ink: var(--pill-negative-ink);
+  --color-pill-warning-bg: var(--pill-warning-bg);
+  --color-pill-warning-ink: var(--pill-warning-ink);
+  --color-pill-neutral-bg: var(--pill-neutral-bg);
+  --color-pill-neutral-ink: var(--pill-neutral-ink);
+}
+
+/* Names Tailwind owns (font, text, spacing, radius, shadow) are declared here only; static keeps them on :root for plain CSS. */
+@theme static {
+  --font-*: initial;
+  --font-sans: "IBM Plex Sans", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, monospace;
+  --font-weight-*: initial;
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+
+  --text-*: initial;
+  --text-title: 22px;
+  --text-title--line-height: 1.2;
+  --text-section: 16px;
+  --text-section--line-height: 1.2;
+  --text-kpi: 28px;
+  --text-kpi--line-height: 1.2;
+  --text-body: 14px;
+  --text-body--line-height: 1.5;
+  --text-small: 12px;
+  --text-small--line-height: 1.5;
+
+  --spacing: 4px;
+  --spacing-row: 48px;
+  --spacing-control: 32px;
+  --spacing-touch: 44px;
+  --spacing-sidebar: 228px;
+  --spacing-topbar: 48px;
+  --spacing-inset: 8px;
+
+  --radius-*: initial;
+  --radius-sheet: 16px;
+  --radius-card: 8px;
+  --radius-control: 6px;
+  --radius-pill: 9999px;
+
+  --shadow-*: initial;
+  --shadow-float: 0 8px 24px rgb(19 20 22 / 0.12);
+
+  /* Hover and press (DESIGN.md: 120ms ease-out). */
+  --default-transition-duration: 120ms;
+  --default-transition-timing-function: ease-out;
 }

@@ -1,119 +1,134 @@
+@import "tailwindcss";
 @import "./tokens.css";
 
-* {
-  box-sizing: border-box;
+/* Layered so a utility on a component always wins over these defaults. */
+@layer base {
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--text);
+    font: 400 var(--text-body) / 1.5 var(--font-sans);
+  }
+
+  ::selection {
+    background: var(--active);
+  }
+
+  :focus-visible {
+    outline: var(--focus-width) solid var(--accent);
+    outline-offset: var(--focus-width);
+  }
+
+  h1 {
+    margin: 0 0 var(--space-6);
+    font-size: var(--text-title);
+    font-weight: 600;
+    line-height: 1.2;
+  }
+
+  h2 {
+    margin: 0 0 var(--space-1);
+    font-size: var(--text-section);
+    font-weight: 500;
+    line-height: 1.2;
+  }
+
+  button {
+    cursor: pointer;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    ::before,
+    ::after {
+      transition-duration: 0ms !important;
+      animation-duration: 0ms !important;
+    }
+  }
 }
 
-body {
-  margin: 0;
-  background: var(--ground);
-  color: var(--text);
-  font: 400 var(--text-body) / 1.5 var(--font-sans);
-}
+/* The health page (S1) until the screens replace it. */
+@layer components {
+  .frame {
+    min-height: 100dvh;
+    padding: var(--spacing-inset);
+  }
 
-::selection {
-  background: var(--active);
-}
+  .sheet {
+    min-height: calc(100dvh - 2 * var(--spacing-inset));
+    padding: var(--space-6);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sheet);
+  }
 
-:focus-visible {
-  outline: var(--focus-width) solid var(--accent);
-  outline-offset: var(--focus-width);
-}
+  .sheet > * {
+    max-width: var(--measure);
+  }
 
-.frame {
-  min-height: 100dvh;
-  padding: var(--sheet-inset);
-}
+  .muted {
+    margin: 0;
+    color: var(--muted);
+  }
 
-.sheet {
-  min-height: calc(100dvh - 2 * var(--sheet-inset));
-  padding: var(--space-6);
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sheet);
-}
+  .checks {
+    margin: var(--space-4) 0 0;
+    padding: 0;
+  }
 
-.sheet > * {
-  max-width: var(--measure);
-}
+  .checks > div {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-height: var(--spacing-row);
+    border-top: 1px solid var(--rule);
+  }
 
-h1 {
-  margin: 0 0 var(--space-6);
-  font-size: var(--text-title);
-  font-weight: 600;
-  line-height: 1.2;
-}
+  .checks dt {
+    margin: 0;
+  }
 
-h2 {
-  margin: 0 0 var(--space-1);
-  font-size: var(--text-section);
-  font-weight: 500;
-  line-height: 1.2;
-}
+  .checks dd {
+    margin: 0;
+  }
 
-.muted {
-  margin: 0;
-  color: var(--muted);
-}
+  .pill {
+    padding: var(--space-half) var(--space-2);
+    border-radius: var(--radius-pill);
+    font-size: var(--text-small);
+    font-weight: 500;
+    background: var(--pill-neutral-bg);
+    color: var(--pill-neutral-ink);
+  }
 
-.checks {
-  margin: var(--space-4) 0 0;
-  padding: 0;
-}
+  .pill[data-ok="true"] {
+    background: var(--pill-positive-bg);
+    color: var(--pill-positive-ink);
+  }
 
-.checks > div {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  min-height: var(--row-height);
-  border-top: 1px solid var(--rule);
-}
+  .pill[data-ok="false"] {
+    background: var(--pill-negative-bg);
+    color: var(--pill-negative-ink);
+  }
 
-.checks dt {
-  margin: 0;
-}
+  .sheet > button {
+    height: var(--spacing-control);
+    margin-top: var(--space-4);
+    padding: 0 var(--space-4);
+    border: 0;
+    border-radius: var(--radius-control);
+    background: var(--text);
+    color: var(--surface);
+    font: 500 var(--text-body) / 1 var(--font-sans);
+    transition: opacity var(--press);
+  }
 
-.checks dd {
-  margin: 0;
-}
+  .sheet > button:hover {
+    opacity: 0.85;
+  }
 
-.pill {
-  padding: var(--space-half) var(--space-2);
-  border-radius: var(--radius-pill);
-  font-size: var(--text-small);
-  font-weight: 500;
-  background: var(--pill-neutral-bg);
-  color: var(--pill-neutral-ink);
-}
-
-.pill[data-ok="true"] {
-  background: var(--pill-positive-bg);
-  color: var(--pill-positive-ink);
-}
-
-.pill[data-ok="false"] {
-  background: var(--pill-negative-bg);
-  color: var(--pill-negative-ink);
-}
-
-button {
-  height: var(--control-height);
-  margin-top: var(--space-4);
-  padding: 0 var(--space-4);
-  border: 0;
-  border-radius: var(--radius-control);
-  background: var(--text);
-  color: var(--surface);
-  font: 500 var(--text-body) / 1 var(--font-sans);
-  cursor: pointer;
-  transition: opacity var(--press);
-}
-
-button:hover {
-  opacity: 0.85;
-}
-
-button[aria-disabled="true"] {
-  opacity: 0.6;
-  cursor: default;
+  .sheet > button[aria-disabled="true"] {
+    opacity: 0.6;
+    cursor: default;
+  }
 }
