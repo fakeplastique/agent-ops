@@ -3,7 +3,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 PREV=${1:-HEAD^}
-DB=skew_check PORT=8011
+DB=${SKEW_DB:-skew_check} PORT=${SKEW_PORT:-8011}
 OWNER=postgresql://app:app@localhost:5432/$DB
 APP=postgresql://app_rt:app_rt@localhost:5432/$DB
 
@@ -50,6 +50,7 @@ if migrate "$tmp/broken"; then echo "FAIL: broken migration succeeded"; exit 1; 
 [ "$(version)" = "$head" ] || { echo "FAIL: version moved to $(version)"; exit 1; }
 [ -z "$(psql -d $DB -c "select to_regclass('skew_half')")" ] || { echo "FAIL: partial table left"; exit 1; }
 
+if [ -n "${SKEW_SKIP_ROLE_PASSWORD:-}" ]; then echo "SKEW OK (role password probe skipped: parallel lane)"; exit 0; fi
 echo "== APP_RT_PASSWORD replaces the dev password (restored afterwards: the role is cluster-wide)"
 APP_RT_PASSWORD=probe-pw migrate backend
 login() { PGPASSWORD=$1 command psql -h localhost -U app_rt -d $DB -tAc "select 1" 2>/dev/null || true; }

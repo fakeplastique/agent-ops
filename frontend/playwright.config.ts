@@ -1,6 +1,8 @@
 import { defineConfig } from "@playwright/test";
 
-const WEB = "http://localhost:3100";
+// Ports come from the gate (GATE_LANE gives each worktree its own); defaults match a plain run.
+const API_PORT = process.env.API_PORT ?? "8000";
+const WEB = `http://localhost:${process.env.WEB_PORT ?? "3100"}`;
 
 export default defineConfig({
   testDir: "e2e",
@@ -13,12 +15,12 @@ export default defineConfig({
   // reuseExistingServer lets gate.sh share one API with newman.
   webServer: [
     {
-      command: "uv run --project ../backend uvicorn app.main:app --app-dir ../backend --port 8000",
-      url: "http://localhost:8000/healthz",
+      command: `uv run --project ../backend uvicorn app.main:app --app-dir ../backend --port ${API_PORT}`,
+      url: `http://localhost:${API_PORT}/healthz`,
       reuseExistingServer: true,
     },
     {
-      command: "pnpm build && pnpm start -p 3100",
+      command: `pnpm build && pnpm start -p ${process.env.WEB_PORT ?? "3100"}`,
       url: WEB,
       reuseExistingServer: false, // a stale web server would hide a broken build
       timeout: 180_000,

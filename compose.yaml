@@ -5,14 +5,14 @@ services:
       POSTGRES_USER: app
       POSTGRES_PASSWORD: app
       POSTGRES_DB: agent_ops
-    ports: ["5432:5432"]
+    ports: ["${PG_PUBLISH:-5432:5432}"] # a gate lane publishes on a random host port
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U app -d agent_ops"]
       interval: 2s
       retries: 30
   redis:
     image: redis:7
-    ports: ["6379:6379"]
+    ports: ["${REDIS_PUBLISH:-6379:6379}"]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 2s
