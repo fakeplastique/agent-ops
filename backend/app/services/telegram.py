@@ -145,7 +145,7 @@ _SHOWN = text(
 )
 _WHO = text("select id from users where telegram_chat_id = :c")
 _HANDLE = text(
-    "select organization_id, step_id, user_id, chat_id from telegram_messages where handle_hash = :h"
+    "select organization_id, step_id, user_id from telegram_messages where handle_hash = :h"
 )
 
 
@@ -243,7 +243,7 @@ async def press(
         await lookup_as(c, "app.telegram_handle_hash", handle)
         user = (await c.execute(_WHO, {"c": from_id})).scalar()
         row = (await c.execute(_HANDLE, {"h": handle})).first()
-    if user is None or row is None or row.user_id != user or row.chat_id != from_id:
+    if user is None or row is None or row.user_id != user:  # sent to someone else, or relinked
         return PressResult(NOT_VALID)
     org, step_id, approve = row.organization_id, row.step_id, m.group(1) == "a"
     try:

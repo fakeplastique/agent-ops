@@ -291,6 +291,14 @@ async def test_press_by_unlinked_or_different_user_does_nothing(tg, owner_engine
         r = await hook(web, upd)
         assert r.status_code == 200 and r.json()["method"] == "answerCallbackQuery"
         assert await state(owner_engine, w) == before, upd  # catches: trusting the handle alone
+    # The Telegram account now belongs to another (eligible) user: the old prompt is not theirs.
+    third = await staff(owner_engine, w.org, "manager")
+    await _exec(owner_engine, "update users set telegram_chat_id=null where id=:u", u=m)
+    await _exec(owner_engine, "update users set telegram_chat_id=:c where id=:u", c=cm, u=third)
+    r = await hook(web, press(approve, from_id=cm))
+    assert "no longer valid" in r.json()["text"] and await state(owner_engine, w) == before
+    await _exec(owner_engine, "update users set telegram_chat_id=null where id=:u", u=third)
+    await _exec(owner_engine, "update users set telegram_chat_id=:c where id=:u", c=cm, u=m)
     assert bot.of("editMessageText") == []
 
     # SC24: the linked approver's own press decides through decide_step (receipt and all).
