@@ -120,6 +120,7 @@ EXEMPT: set[str] = {
     "/api/v1/stats/timeseries",
     # The tenant comes from the credential; no id parameter (tests/cross_tenant/test_events.py).
     "/api/v1/events",
+    "/api/v1/realtime/ticket",  # same: the ticket is bound to the credential's organization
     # Cross-tenant by design for platform admins; everyone else gets 403 before any id is read
     # (tests/integration/test_flag_paths.py::test_platform_admin_only_from_env_allowlist).
     "/api/v1/platform/organizations/{organization_id}/plan",

@@ -9,7 +9,8 @@ from app.api.deps import ActorDep, ClockDep, EngineDep, RedisDep, session_user
 from app.authz.matrix import Role
 from app.authz.principals import UserPrincipal
 from app.authz.resolver import resolve_bearer
-from app.domain.errors import Forbidden, InvalidInput, NotFoundError, Unauthenticated
+from app.domain.errors import Forbidden, NotFoundError, Unauthenticated
+from app.realtime.feed import parse_cursor
 from app.realtime.longpoll import MAX_WAIT, poll, waiter_slot
 
 router = APIRouter(prefix="/events", tags=["realtime"])
@@ -28,16 +29,6 @@ class FeedOut(BaseModel):
     organization_id: uuid.UUID
     events: list[EventOut]
     after: int  # the cursor for the next poll (past dropped events too)
-
-
-_MAX_SEQ = 2**63 - 1  # bigint
-
-
-def _cursor(raw: str) -> int:
-    """Plain ASCII digits only: int() alone would also take "1_0", "+3" and " 3"."""
-    if not (raw.isascii() and raw.isdigit()) or len(raw) > 19 or int(raw) > _MAX_SEQ:
-        raise InvalidInput("after must be a sequence number (digits only)")
-    return int(raw)
 
 
 @router.get("", response_model=FeedOut)
@@ -76,7 +67,7 @@ async def long_poll(
             raise NotFoundError
         return now.role
 
-    cursor = _cursor(after)
+    cursor = parse_cursor(after)
     async with waiter_slot(redis, org, actor.user_id, clock.now().timestamp()):
         events, cursor = await poll(
             engine, org, cursor, wait, limit, recheck, request.is_disconnected

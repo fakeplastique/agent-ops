@@ -16,6 +16,7 @@ from app.config import settings
 from app.db.engine import make_engine
 from app.db.guard import assert_safe_role
 from app.mcp.server import http_app
+from app.realtime import ws
 from app.services import cache
 
 
@@ -68,6 +69,7 @@ register_error_handlers(app)
 app.include_router(health.router)
 app.include_router(metrics.router)
 app.include_router(api_v1_router)
+app.include_router(ws.router)  # /ws at the root (spec 5.3)
 app.router.routes.append(
     Route("/mcp", McpEndpoint())
 )  # an exact path: a Mount would redirect /mcp to /mcp/
