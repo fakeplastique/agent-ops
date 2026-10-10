@@ -129,7 +129,7 @@ export function Onboarding() {
   const session = useSession();
   return (
     <AuthFrame title="Set up your organization" lead="Create an organization for your team. You become its admin.">
-      <ReadView read={session} label="Create an organization" loading={<p className="m-0 text-muted">Checking your session…</p>}>
+      <ReadView read={session} label="Create an organization" loading={<p aria-busy="true" className="m-0 text-muted">Checking your session…</p>}>
         {() => <CreateOrganization />}
       </ReadView>
       <div className="flex flex-col items-start gap-3 border-t border-rule pt-4">

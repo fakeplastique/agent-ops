@@ -44,11 +44,13 @@ export function resetClient() {
     localStorage.clear();
     sessionStorage.clear();
   } catch {}
-  if (typeof BroadcastChannel === "undefined") return;
-  const ch = new BroadcastChannel(CHANNEL);
-  ch.postMessage("identity-changed");
-  ch.close();
+  tabChannel()?.postMessage("identity-changed");
 }
+
+// One channel per tab: a message is never delivered to the object that posted it, so a tab ignores its own change.
+let channel: BroadcastChannel | null = null;
+const tabChannel = () =>
+  typeof BroadcastChannel === "undefined" ? null : (channel ??= new BroadcastChannel(CHANNEL));
 
 /** Ends the session; the local copy goes even if the server call fails. A full load leaves no in-memory state. */
 export async function signOut() {
@@ -74,13 +76,16 @@ export function enterOrganization() {
 /** Another tab changed who is signed in or which organization is selected: reload so this tab shows no stale data. */
 export function useIdentitySync() {
   useEffect(() => {
-    if (typeof BroadcastChannel === "undefined") return;
-    const ch = new BroadcastChannel(CHANNEL);
-    const onMessage = () => window.location.reload();
-    ch.addEventListener("message", onMessage);
+    const ch = tabChannel();
+    // Without the hash: assigning a URL that differs only by its hash would scroll, not reload.
+    const reload = () => goTo(window.location.pathname + window.location.search);
+    // Back after a sign-out can restore this page from the back/forward cache with the old DOM in it.
+    const onShow = (e: PageTransitionEvent) => e.persisted && reload();
+    ch?.addEventListener("message", reload);
+    window.addEventListener("pageshow", onShow);
     return () => {
-      ch.removeEventListener("message", onMessage);
-      ch.close();
+      ch?.removeEventListener("message", reload);
+      window.removeEventListener("pageshow", onShow);
     };
   }, []);
 }

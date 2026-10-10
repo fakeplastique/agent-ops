@@ -51,6 +51,7 @@ describe("Invitation", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("This invitation can't be used");
     expect(screen.getByRole("alert")).toHaveTextContent("Ask the person who invited you for a new link.");
     expect(screen.queryByRole("button", { name: "Accept invitation" })).not.toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveFocus(); // Accept unmounted under the keyboard; focus lands on the reason
     expect(goTo).not.toHaveBeenCalled();
   });
 
