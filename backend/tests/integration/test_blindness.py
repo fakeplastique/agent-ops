@@ -4,9 +4,11 @@ import pytest
 from sqlalchemy import text
 
 from app.db.session import tenant_session
+from app.services import outbox
 from app.services.votes import visible_votes
+from tests.api.harness import user_auth
 
-from .helpers import cast, fetch, make_world, open_request, voters
+from .helpers import cast, fetch, make_world, open_request, staff, voters
 
 pytestmark = pytest.mark.anyio
 
@@ -121,6 +123,38 @@ async def test_round_revealed_event_carries_votes_once(app_engine, owner_engine)
         o=w.org,
     )
     assert len(audit) == 1 and len(audit[0][0]["votes"]) == 3
+
+
+async def test_round_one_events_hide_verdicts_for_member_manager_and_admin_until_reveal(
+    web, app_engine, owner_engine
+):
+    w = await make_world(owner_engine)
+    req = await open_request(app_engine, w)
+    a, b, c = await voters(owner_engine, w, 3)
+    await cast(app_engine, w, req, a, "reject", 0.4242, rationale=SECRET)
+    await cast(app_engine, w, req, b, "reject", 0.5151, rationale=SECRET)
+    # What the emitter must never write: the feed strips it anyway (defence in depth).
+    async with tenant_session(app_engine, w.org) as s:
+        await outbox.emit(s, w.org, "vote.cast", {
+            "decision_request_id": str(req["id"]), "session_id": str(c), "round": 1, "request_version": 1,
+            "cast": 2, "quorum": 3, "verdict": "reject", "confidence": 0.6161, "rationale": SECRET,
+        })  # fmt: skip
+    heads = {
+        role: await user_auth(app_engine, w.org, await staff(owner_engine, w.org, role))
+        for role in ("member", "manager", "org_admin")
+    }
+    for role, h in heads.items():
+        res = await web.client.get("/api/v1/events", params={"after": 0, "wait": 0}, headers=h)
+        assert res.status_code == 200, res.text
+        # catches: admin treated as exempt from blindness
+        assert all(x not in res.text for x in ("reject", "0.4242", "0.5151", "0.6161", SECRET)), role  # fmt: skip
+        assert [e["type"] for e in res.json()["events"]].count("vote.cast") == 3, role
+    await cast(app_engine, w, req, c, "approve", 0.9)
+    for role, h in heads.items():
+        res = await web.client.get("/api/v1/events", params={"after": 0, "wait": 0}, headers=h)
+        revealed = [e for e in res.json()["events"] if e["type"] == "round.revealed"]
+        assert len(revealed) == 1 and SECRET not in res.text, role
+        assert sorted(v["verdict"] for v in revealed[0]["data"]["votes"]) == ["approve", "reject", "reject"]  # fmt: skip
 
 
 async def test_rationale_never_appears_in_any_event_or_audit_row(app_engine, owner_engine):

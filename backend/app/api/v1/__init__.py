@@ -5,6 +5,7 @@ from app.api.v1 import (
     audit,
     auth,
     decisions,
+    events,
     invitations,
     me,
     members,
@@ -42,5 +43,6 @@ api_v1_router.include_router(plan.router)
 api_v1_router.include_router(platform.router)
 api_v1_router.include_router(webhooks.router)
 api_v1_router.include_router(stats.router)
+api_v1_router.include_router(events.router)
 
 __all__ = ["api_v1_router"]
