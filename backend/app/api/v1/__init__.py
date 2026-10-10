@@ -14,6 +14,7 @@ from app.api.v1 import (
     platform,
     policies,
     receipts,
+    stats,
     steps,
     teams,
     tokens,
@@ -40,5 +41,6 @@ api_v1_router.include_router(tokens.router)
 api_v1_router.include_router(plan.router)
 api_v1_router.include_router(platform.router)
 api_v1_router.include_router(webhooks.router)
+api_v1_router.include_router(stats.router)
 
 __all__ = ["api_v1_router"]
