@@ -41,6 +41,13 @@ class TelegramNotifier:
         await self._call("editMessageText", body)
 
 
+def configured() -> TelegramNotifier | None:
+    """The bot from TELEGRAM_BOT_TOKEN; none configured means nothing is sent."""
+    from app.config import settings
+
+    return TelegramNotifier(settings.telegram_bot_token) if settings.telegram_bot_token else None
+
+
 class BotApiError(Exception):
     def __init__(self, status: int) -> None:
         super().__init__(f"Bot API answered {status}")
