@@ -11,7 +11,11 @@ pytestmark = pytest.mark.anyio
 
 
 async def _waiting_on_counter(owner: AsyncEngine) -> bool:
-    q = "select count(*) from pg_stat_activity where wait_event_type = 'Lock' and query like '%org_event_counters%'"
+    # Scoped to this database: parallel sessions run the same test elsewhere.
+    q = (
+        "select count(*) from pg_stat_activity where datname = current_database()"
+        " and wait_event_type = 'Lock' and query like '%org_event_counters%'"
+    )
     for _ in range(100):
         async with owner.connect() as c:
             if (await c.scalar(text(q))) or 0:
