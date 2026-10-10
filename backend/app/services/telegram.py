@@ -89,6 +89,7 @@ async def redeem(
     still have the flag; any refusal rolls back, so the code is not spent."""
     if chat_type != "private" or chat_id != from_id:
         return PRIVATE_ONLY
+    code = code.upper()  # a typed code may come in lower case
     if not _CODE.fullmatch(code):
         return BAD_CODE
     try:

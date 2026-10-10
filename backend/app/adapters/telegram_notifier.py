@@ -1,9 +1,19 @@
 import asyncio
+import logging
 from typing import Any
 
 import httpx2
 
 TIMEOUT = 10.0  # seconds per Bot API call (spec 9)
+_HOST = "api.telegram.org"
+
+
+def _no_bot_urls(record: logging.LogRecord) -> bool:
+    # httpx2 logs every request URL at INFO, and the Bot API puts the token in the path.
+    return _HOST not in record.getMessage()
+
+
+logging.getLogger("httpx2").addFilter(_no_bot_urls)
 
 
 class TelegramNotifier:
@@ -15,7 +25,7 @@ class TelegramNotifier:
         transport: httpx2.AsyncBaseTransport | None = None,
         timeout: float = TIMEOUT,
     ) -> None:
-        self.base = f"https://api.telegram.org/bot{token}/"
+        self.base = f"https://{_HOST}/bot{token}/"
         self.transport, self.timeout = transport, timeout
 
     async def _call(self, method: str, body: dict[str, Any]) -> Any:

@@ -21,12 +21,16 @@ from app.telegram import webhook as tg_webhook
 from tests.integration.helpers import (
     _exec,
     approval_world,
+    cast,
     decide,
     fetch,
     make_member,
     make_org,
+    make_world,
+    open_request,
     pending_step,
     staff,
+    voters,
 )
 from tests.integration.web_harness import ORIGIN
 from tests.security.test_token_hygiene import whole_database_text
@@ -153,7 +157,7 @@ async def test_link_code_single_use_10min_8_chars_hashed_private_chat_only(
         assert r.status_code == 200 and "private" in r.json()["text"]
     assert await chat_of(owner_engine, user) is None
 
-    r = await hook(web, message(f"/link {code}"))
+    r = await hook(web, message(f"/link {code.lower()}"))  # typed by hand
     assert r.json()["method"] == "sendMessage" and r.json()["chat_id"] == CHAT
     assert await chat_of(owner_engine, user) == CHAT
     assert (await web.client.get(ME)).json() == {"linked": True}
@@ -206,6 +210,33 @@ async def test_free_plan_cannot_link_or_receive(tg, owner_engine):
     await _exec(owner_engine, "update organizations set plan_key='free' where id=:o", o=pro)
     r = await hook(web, message(f"/start {code}"))
     assert "Pro" in r.json()["text"] and await chat_of(owner_engine, user) is None
+
+
+async def test_free_plan_receives_nothing(tg, owner_engine, app_engine):
+    _, bot = tg
+    w, _req, step, _, _ = await approvers(owner_engine, app_engine, plan="free")
+    assert await prompt(app_engine, owner_engine, w, step, bot) == 0  # catches: ungated delivery
+    assert bot.calls == [] and not await fetch(owner_engine, "select 1 from telegram_messages"
+                                                " where organization_id=:o", o=w.org)  # fmt: skip
+    # Prompted on Pro, then downgraded: the outcome is not delivered either.
+    w, _req, step, (m,), _ = await approvers(owner_engine, app_engine, 1)
+    assert await prompt(app_engine, owner_engine, w, step, bot) == 1
+    await _exec(owner_engine, "update organizations set plan_key='free' where id=:o", o=w.org)
+    await decide(app_engine, w, step, m)
+    assert await outcome(app_engine, owner_engine, w, step, bot) == 0
+    assert bot.of("editMessageText") == []
+
+
+async def outcome(app_engine, owner, w, step, bot: FakeBot) -> int:
+    """Run the arq `notifications` consumer on the step's step.decided event."""
+    from app.worker.notify import notifications
+
+    ((event,),) = await fetch(
+        owner, "select id from outbox_events where type='step.decided' and payload->>'id'=:s",
+        s=str(step),
+    )  # fmt: skip
+    ctx = {"work_engine": app_engine, "notifier": bot.notifier()}
+    return await notifications(ctx, str(w.org), str(event))
 
 
 # --- buttons ---------------------------------------------------------------------------------------
@@ -268,9 +299,9 @@ async def state(owner, w) -> list:
     ]  # fmt: skip
 
 
-async def approvers(owner, app_engine, n=2):
-    """A Pro request waiting on one manager step, and n linked managers (users, chats)."""
-    w, req, _ = await approval_world(owner, app_engine, levels=ONE_LEVEL)
+async def approvers(owner, app_engine, n=2, plan="pro"):
+    """A request waiting on one manager step, and n linked managers (users, chats)."""
+    w, req, _ = await approval_world(owner, app_engine, levels=ONE_LEVEL, plan=plan)
     step, *_ = await pending_step(owner, req)
     people = [await staff(owner, w.org, "manager") for _ in range(n)]
     return w, req, step, people, [await link(owner, p) for p in people]
@@ -402,3 +433,69 @@ async def test_callback_data_is_opaque_and_tampered_data_ignored(tg, owner_engin
     for junk in ([], "x", {"callback_query": "x"}, {"callback_query": {"data": "a:" + handle}}):
         assert (await hook(web, junk)).status_code == 200  # never 5xx: Telegram would redeliver
     assert await state(owner_engine, w) == before
+
+
+# --- messages --------------------------------------------------------------------------------------
+
+
+async def test_title_markdown_html_escaped_and_no_payload_sent(
+    tg, owner_engine, app_engine, caplog
+):
+    caplog.set_level(logging.DEBUG)
+    _, bot = tg
+    w = await make_world(owner_engine, "pro", levels=ONE_LEVEL, floors={"refund": "medium"})
+    title = '<b>Pay</b> *now* [x](https://evil.test) & <a href="tg://x">y</a>'
+    req = await open_request(
+        app_engine, w, title=title, description="DESC-SENTINEL", payload={"k": "PAYLOAD-SENTINEL"}
+    )
+    for s in await voters(owner_engine, w, 3):
+        await cast(app_engine, w, req, s)
+    step, *_ = await pending_step(owner_engine, req)
+    m = await staff(owner_engine, w.org, "manager")
+    cm = await link(owner_engine, m)
+    assert await prompt(app_engine, owner_engine, w, step, bot) == 1
+    (sent,) = bot.of("sendMessage")
+    assert sent["parse_mode"] == "HTML" and sent["chat_id"] == cm
+    assert "&lt;b&gt;Pay&lt;/b&gt;" in sent["text"] and "&lt;a href" in sent["text"]
+    assert "<b>Pay" not in sent["text"] and "<a " not in sent["text"]  # catches: agent markup
+    assert "medium" in sent["text"] and "level 1" in sent["text"]
+    everything = json.dumps(bot.calls)
+    assert "SENTINEL" not in everything  # catches: description or payload leaking to Telegram
+    ((mid,),) = await fetch(
+        owner_engine, "select message_id from telegram_messages where step_id=:s", s=step
+    )
+    assert mid == bot.next_id
+
+    # The step is decided elsewhere: the consumer edits every prompt of it to the outcome.
+    await decide(app_engine, w, step, m, approve=False)
+    assert await outcome(app_engine, owner_engine, w, step, bot) == 1
+    (edit,) = bot.of("editMessageText")
+    assert (edit["chat_id"], edit["message_id"]) == (cm, mid) and "Rejected" in edit["text"]
+    assert "&lt;b&gt;Pay" in edit["text"] and "reply_markup" not in edit
+    assert "SENTINEL" not in json.dumps(bot.calls)
+    # The bot token rides in the Bot API URL: no log line may carry it (I13).
+    assert bot.calls and "TESTTOKEN" not in caplog.text
+
+
+async def test_telegram_timeout_10s_does_not_block_worker(tg, owner_engine, app_engine):
+    from app.adapters import telegram_notifier
+
+    _, bot = tg
+    assert telegram_notifier.TIMEOUT == 10.0 and TelegramNotifier("t").timeout == 10.0
+    w, _req, step, _people, chats = await approvers(owner_engine, app_engine, 4)
+    bot.hang = set(chats[:3])  # three chats whose Bot API calls never answer
+    started = asyncio.get_running_loop().time()
+    assert await prompt(app_engine, owner_engine, w, step, bot, timeout=0.5) == 1
+    # Side by side, each cut at its deadline: three hangs cost one timeout, not three.
+    assert asyncio.get_running_loop().time() - started < 1.4
+    rows = dict(await fetch(
+        owner_engine, "select chat_id, message_id from telegram_messages where step_id=:s", s=step
+    ))  # fmt: skip
+    assert rows[chats[3]] is not None and all(rows[c] is None for c in chats[:3])
+    # A hanging edit is cut the same way and the press still answers.
+    web, _ = tg
+    app.dependency_overrides[tg_webhook.get_notifier] = lambda: bot.notifier(0.5)
+    approve = buttons_for(bot, chats[3])["Approve"]
+    bot.hang.add(chats[3])
+    r = await hook(web, press(approve, from_id=chats[3]))
+    assert r.json()["text"] == "Approved."
