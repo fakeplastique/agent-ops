@@ -4,13 +4,14 @@ The plaintext secret leaves only in the create and rotate replies; nothing here 
 
 import uuid
 from collections.abc import Iterable
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.domain.errors import InvalidInput, NotFoundError
+from app.domain.errors import InvalidInput, NotFoundError, SubscriptionPaused
 from app.domain.secretbox import SecretBox
 from app.services import audit, webhook_security
 
@@ -136,6 +137,60 @@ async def delete_subscription(
     if (await s.execute(_DELETE, {"o": org, "i": sub})).first() is None:
         raise NotFoundError
     await audit.record(s, org, "webhook_subscription", sub, "deleted", "user", actor)
+
+
+_DCOLS = (
+    "id, event_id, event_type, status, attempt, next_attempt_at, last_status_code, last_error,"
+    " created_at, updated_at"
+)
+_DELIVERIES = text(
+    f"select {_DCOLS}, count(*) over () as total from webhook_deliveries"
+    " where organization_id = :o and subscription_id = :s"
+    " order by created_at desc, id offset :skip limit :limit"
+)
+_DELIVERY = text(
+    f"select {_DCOLS} from webhook_deliveries"
+    " where organization_id = :o and subscription_id = :s and id = :d"
+)
+# Same row, so the same webhook-id; a pending row is already queued, and a paused hook queues nothing.
+_REDELIVER = text(
+    "update webhook_deliveries d set status = 'pending', attempt = 0, next_attempt_at = :now,"
+    " last_status_code = null, last_error = null, updated_at = now() from webhook_subscriptions s"
+    " where s.organization_id = :o and s.id = d.subscription_id and s.active"
+    " and d.organization_id = :o and d.subscription_id = :s and d.id = :d and d.status <> 'pending'"
+    " returning d.id"
+)
+
+
+async def list_deliveries(
+    s: AsyncSession, org: uuid.UUID, sub: uuid.UUID, skip: int, limit: int
+) -> tuple[list[dict], int]:
+    # 404 for a foreign or deleted subscription, not an empty page
+    await get_subscription(s, org, sub)
+    params = {"o": org, "s": sub, "skip": skip, "limit": limit}
+    rows = (await s.execute(_DELIVERIES, params)).mappings().all()
+    return [dict(r) for r in rows], (rows[0]["total"] if rows else 0)
+
+
+async def redeliver(
+    s: AsyncSession,
+    org: uuid.UUID,
+    actor: uuid.UUID,
+    sub: uuid.UUID,
+    delivery: uuid.UUID,
+    now: datetime,
+) -> dict:
+    """Queue a finished delivery again with 5 fresh attempts; the sweep sends it, not this call."""
+    params = {"o": org, "s": sub, "d": delivery, "now": now}
+    queued = (await s.execute(_REDELIVER, params)).first() is not None
+    if queued:
+        await audit.record(s, org, "webhook_delivery", delivery, "redelivered", "user", actor)
+    row = (await s.execute(_DELIVERY, params)).mappings().first()
+    if row is None:
+        raise NotFoundError
+    if not queued and not (await get_subscription(s, org, sub))["active"]:
+        raise SubscriptionPaused  # 409, not a 202 the claim would then kill
+    return dict(row)
 
 
 async def load_secret(s: AsyncSession, org: uuid.UUID, sub: uuid.UUID) -> str:

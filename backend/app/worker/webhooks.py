@@ -1,0 +1,209 @@
+"""Webhook delivery (S28, D18): the row id is the webhook-id; HTTP runs between tenant sessions, never inside."""
+
+import asyncio
+import json
+import logging
+import uuid
+from collections.abc import Awaitable, Callable, Mapping
+from datetime import datetime, timedelta
+from typing import Any
+
+import httpx2
+from arq.worker import Retry
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncEngine
+
+from app.db.session import tenant_session
+from app.domain.errors import WebhookUrlRefused
+from app.ports.clock import Clock
+from app.services import webhooks as subscriptions
+from app.services.webhook_security import post_pinned, signed_headers
+
+log = logging.getLogger(__name__)
+
+type Send = Callable[[str, bytes, Mapping[str, str]], Awaitable[int]]
+
+MAX_ATTEMPTS = 5
+# Wait after failed attempt n (1-4). After the 5th the row is dead; its lease only covers a lost worker.
+BACKOFF = (30, 120, 900, 3600)
+LEASE = 60  # seconds: longer than DNS (5 s) plus the call (5 s)
+DB_SLOTS = (
+    5  # sessions one batch may hold at once: the engine's pool_size, so a finish never waits it out
+)
+
+_FAN_OUT = text(
+    "insert into webhook_deliveries (organization_id, subscription_id, event_id, event_type, next_attempt_at)"
+    " select :o, s.id, e.id, e.type, :now from webhook_subscriptions s join outbox_events e"
+    "  on e.organization_id = s.organization_id and e.id = :e"
+    " where s.organization_id = :o and s.active and e.type = any(s.events)"
+    " on conflict (subscription_id, event_id) do nothing returning id"
+)
+# SKIP LOCKED: another worker is sending this row right now; it will record the result.
+_CLAIM = text(
+    "select d.status, d.attempt, d.next_attempt_at, s.url, s.active, s.id as subscription_id,"
+    " e.type, e.payload, e.seq, e.created_at"
+    " from webhook_deliveries d join webhook_subscriptions s on s.id = d.subscription_id"
+    " join outbox_events e on e.id = d.event_id"
+    " where d.organization_id = :o and d.id = :d for update of d skip locked"
+)
+_START = text(
+    "update webhook_deliveries set attempt = attempt + 1, next_attempt_at = :next, updated_at = now()"
+    " where organization_id = :o and id = :d returning attempt"
+)
+# Conditional on the attempt it belongs to: a stale result never overwrites a newer attempt or a redeliver.
+# The case keeps the claim's backoff only while pending (CHECK: pending <=> next_attempt_at is set).
+_FINISH = text(
+    "update webhook_deliveries set status = :st, next_attempt_at = case when :st = 'pending'"
+    "  then next_attempt_at end, last_status_code = :code, last_error = :err, updated_at = now()"
+    " where organization_id = :o and id = :d and attempt = :n and status = 'pending'"
+)
+_DUE = text(
+    "select organization_id, id from webhook_deliveries where status = 'pending'"
+    " and next_attempt_at <= :now order by next_attempt_at limit :n"
+)
+_KILL = text(
+    "update webhook_deliveries set status = 'dead', next_attempt_at = null, last_error = :err,"
+    " updated_at = now() where organization_id = :o and id = :d"
+)
+
+
+def _wait(attempt: int) -> timedelta:
+    return timedelta(seconds=BACKOFF[attempt - 1] if attempt <= len(BACKOFF) else LEASE)
+
+
+def body(type: str, payload: dict[str, Any], seq: int, at: datetime) -> bytes:
+    """The Standard Webhooks message. A vote names its verdict only in round 2 (round 1 is blind until
+    `round.revealed`) and never its rationale, whatever the stored event says (spec 4.2 rule 3)."""
+    data = dict(payload)
+    if type == "vote.cast":
+        data.pop("rationale", None)
+        if data.get("round") != 2:
+            data.pop("verdict", None)
+            data.pop("confidence", None)
+    return json.dumps(
+        {"type": type, "timestamp": at.isoformat(), "seq": seq, "data": data},
+        separators=(",", ":"),
+    ).encode()
+
+
+async def _claim(
+    engine: AsyncEngine, org: uuid.UUID, delivery: uuid.UUID, now: datetime
+) -> tuple[int, str, bytes, str | None, str | None] | None:
+    """(attempt, url, body, secret, error) for a due row, or None when there is nothing to send."""
+    async with tenant_session(engine, org) as s:
+        row = (await s.execute(_CLAIM, {"o": org, "d": delivery})).mappings().first()
+        if row is None or row["status"] != "pending" or row["next_attempt_at"] > now:
+            return None
+        if row["attempt"] >= MAX_ATTEMPTS or not row["active"]:
+            # Paused: queue nothing (as fan-out does); the admin redelivers after resuming.
+            err = "attempts exhausted" if row["active"] else "subscription is paused"
+            await s.execute(_KILL, {"o": org, "d": delivery, "err": err})
+            return None
+        n = row["attempt"] + 1
+        await s.execute(_START, {"o": org, "d": delivery, "next": now + _wait(n)})
+        secret, err = None, None
+        # A secret that does not open is a failed attempt: raising would roll the claim back and
+        # leave the row at the head of every batch, starving everything behind it.
+        try:
+            secret = await subscriptions.load_secret(s, org, row["subscription_id"])
+        except Exception as e:  # noqa: BLE001
+            log.error("webhook secret unavailable: %s", type(e).__name__)
+            err = f"secret unavailable: {type(e).__name__}"
+        payload = body(row["type"], row["payload"], row["seq"], row["created_at"])
+        return n, row["url"], payload, secret, err
+
+
+async def deliver(
+    engine: AsyncEngine,
+    org: uuid.UUID,
+    delivery: uuid.UUID,
+    clock: Clock,
+    send: Send = post_pinned,
+    slots: asyncio.Semaphore | None = None,
+) -> str | None:
+    """One attempt at one delivery row: its new status, or None if nothing was due."""
+    slots = slots or asyncio.Semaphore(DB_SLOTS)
+    now = clock.now()
+    async with slots:
+        claimed = await _claim(engine, org, delivery, now)
+    if claimed is None:
+        return None
+    n, url, payload, secret, err = claimed
+    code: int | None = None
+    try:
+        if secret is not None:
+            headers = signed_headers(secret, str(delivery), int(now.timestamp()), payload)
+            code = await send(url, payload, headers)
+            err = None if 200 <= code < 300 else f"HTTP {code}"
+    except WebhookUrlRefused as e:
+        err = f"refused: {e.details['rule']}"
+    except TimeoutError:
+        err = "timeout"
+    except (httpx2.HTTPError, OSError) as e:
+        err = f"connection failed: {type(e).__name__}"
+    # Still an attempt: record it, or the row waits out its lease unexplained. Type name only:
+    # an exception's text may carry the URL, and a URL may carry the receiver's token.
+    except Exception as e:  # noqa: BLE001
+        log.error("webhook send failed: %s", type(e).__name__)
+        err = f"failed: {type(e).__name__}"
+    status = "delivered" if err is None else "dead" if n >= MAX_ATTEMPTS else "pending"
+    err = err and err[:200]  # the column's cap
+    params = {"o": org, "d": delivery, "n": n, "st": status, "code": code, "err": err}
+    async with slots, tenant_session(engine, org) as s:
+        await s.execute(_FINISH, params)
+    return status
+
+
+async def _each(
+    engine: AsyncEngine, items: list[tuple[uuid.UUID, uuid.UUID]], clock: Clock, send: Send
+) -> None:
+    # Sends side by side (a hanging receiver costs only its own 5 s); DB sessions capped at DB_SLOTS.
+    slots = asyncio.Semaphore(DB_SLOTS)
+    results = await asyncio.gather(
+        *(deliver(engine, org, d, clock, send, slots) for org, d in items),
+        return_exceptions=True,
+    )
+    for r in results:
+        if isinstance(r, BaseException):
+            log.error("webhook delivery failed: %s", type(r).__name__)
+
+
+async def fan_out(
+    engine: AsyncEngine, org: uuid.UUID, event: uuid.UUID, clock: Clock, send: Send = post_pinned
+) -> int:
+    """Rows for the active subscriptions wanting this event, then a first attempt; a re-run inserts none."""
+    async with tenant_session(engine, org) as s:
+        rows = (await s.execute(_FAN_OUT, {"o": org, "e": event, "now": clock.now()})).all()
+    await _each(engine, [(org, r[0]) for r in rows], clock, send)
+    return len(rows)
+
+
+async def retry_due(
+    scan_engine: AsyncEngine,
+    work_engine: AsyncEngine,
+    clock: Clock,
+    send: Send = post_pinned,
+    *,
+    batch: int = 50,
+) -> int:
+    """Re-send due rows (retries, redelivers, a dead worker's leftovers); the app_worker scan sees ids only."""
+    async with scan_engine.connect() as c:
+        rows = (await c.execute(_DUE, {"now": clock.now(), "n": batch})).all()
+    await _each(work_engine, [(o, d) for o, d in rows], clock, send)
+    return len(rows)
+
+
+async def webhooks(ctx: dict[str, Any], organization_id: str, event_id: str) -> int:
+    """The arq consumer the relay enqueues as `webhooks` (registry.py)."""
+    try:
+        return await fan_out(
+            ctx["work_engine"], uuid.UUID(organization_id), uuid.UUID(event_id), ctx["clock"]
+        )
+    except Exception as e:
+        # The event is already stamped published: a failed fan-out must run again (arq max_tries bounds it).
+        log.error("webhook fan-out failed: %s", type(e).__name__)
+        raise Retry(defer=10 * ctx.get("job_try", 1)) from e
+
+
+async def webhook_retries_job(ctx: dict[str, Any]) -> int:
+    return await retry_due(ctx["scan_engine"], ctx["work_engine"], ctx["clock"])

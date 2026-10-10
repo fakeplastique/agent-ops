@@ -185,3 +185,10 @@ class WebhookUrlRefused(DomainError):
     def __init__(self, rule: str = "") -> None:
         super().__init__(f"webhook URL refused: {rule}")
         self.details = {"rule": rule}
+
+
+class SubscriptionPaused(DomainError):
+    code = "subscription_paused"
+
+    def __init__(self) -> None:
+        super().__init__("the webhook subscription is paused: resume it, then redeliver")

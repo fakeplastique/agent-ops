@@ -10,6 +10,7 @@ from app.main import app
 from app.services.invitations import create_invitation
 from app.services.tokens import create_pat
 from app.services.webhooks import create_subscription
+from app.worker.webhooks import fan_out
 from tests.api.harness import agent_auth
 from tests.integration.helpers import (
     LEVELS3,
@@ -25,6 +26,7 @@ from tests.integration.helpers import (
     voters,
 )
 from tests.integration.web_harness import ORIGIN
+from tests.integration.webhook_harness import answered_204, emit
 
 from .harness import ROUTES, api_routes
 
@@ -50,7 +52,7 @@ BODIES = {
 }
 PARAMS = {
     "organization_id", "invitation_id", "user_id", "decision_request_id", "step_id", "agent_id",
-    "team_id", "policy_id", "token_id", "subscription_id",
+    "team_id", "policy_id", "token_id", "subscription_id", "delivery_id",
 }  # fmt: skip
 
 
@@ -86,10 +88,15 @@ async def _tenant_a(owner, app_engine):
         hook, _ = await create_subscription(
             s, w.org, admin, "https://93.184.215.14/hook", ["decision.created"]
         )
+    await fan_out(app_engine, w.org, await emit(app_engine, w.org), NOW, send=answered_204)
+    [(delivery,)] = await fetch(
+        owner, "select id from webhook_deliveries where subscription_id=:s", s=hook["id"]
+    )
     ids = {
         "organization_id": w.org, "invitation_id": invite, "user_id": w.owner_user,
         "decision_request_id": escalated["id"], "step_id": step, "agent_id": w.identity,
         "team_id": team, "policy_id": w.policy, "token_id": pat, "subscription_id": hook["id"],
+        "delivery_id": delivery,
     }  # fmt: skip
     agent = await agent_auth(app_engine, w.org, w.identity)
     return ids, approved["id"], {"Authorization": f"Bearer {raw}"}, agent

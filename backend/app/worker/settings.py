@@ -8,6 +8,7 @@ from app.config import settings
 from app.db.engine import make_engine
 from app.worker.cron import timeouts_job
 from app.worker.relay import relay_once
+from app.worker.webhooks import webhook_retries_job, webhooks
 
 
 async def startup(ctx: dict[str, Any]) -> None:
@@ -27,15 +28,16 @@ async def relay_job(ctx: dict[str, Any]) -> dict[str, int]:
 
 
 class WorkerSettings:
-    """`arq app.worker.settings.WorkerSettings`. `functions` stays empty until the consumers exist (S28 webhooks,
-    S31 notifications, S34 analytics register `webhooks`, `notifications`, `analytics`): do not run this worker
-    before then, or the jobs the relay enqueues would have no function to run."""
+    """`arq app.worker.settings.WorkerSettings`. Each consumer registers its concern's function here (S28
+    `webhooks`; S31 `notifications` and S34 `analytics` still to come): until they do, the relay's jobs for
+    those concerns fail unrun, so do not deploy this worker before them."""
 
     redis_settings = RedisSettings.from_dsn(settings.redis_url)
     on_startup = startup
     on_shutdown = shutdown
-    functions: list[Any] = []  # noqa: RUF012
+    functions: list[Any] = [webhooks]  # noqa: RUF012
     cron_jobs = [  # noqa: RUF012
         cron(relay_job, second=set(range(60))),  # every second: the relay polls the outbox (D3)
         cron(timeouts_job),  # every minute, at second 0 (S12)
+        cron(webhook_retries_job, second=set(range(0, 60, 10))),  # due retries and redelivers (S28)
     ]
