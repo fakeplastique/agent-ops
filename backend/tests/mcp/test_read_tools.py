@@ -56,7 +56,7 @@ async def test_get_decision_result_wait_seconds_clamped_to_30(
         rows = await fetch(
             owner_engine,
             "select count(*) from pg_stat_activity where usename = 'app_rt'"
-            " and state like 'idle in transaction%'",
+            " and datname = current_database() and state like 'idle in transaction%'",
         )
         open_tx.append(rows[0][0])
 
