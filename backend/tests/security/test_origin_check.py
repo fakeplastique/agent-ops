@@ -97,6 +97,7 @@ def _checks_origin(dependant) -> bool:
 # route is checked by default; listing it here is a decision a reviewer sees.
 BEARER_ONLY: set[tuple[str, str]] = {
     ("POST", "/api/v1/receipts/verify"),  # public, reads no cookie and changes nothing
+    ("POST", "/api/v1/telegram/webhook"),  # Telegram's secret_token header, never a cookie
 }
 
 

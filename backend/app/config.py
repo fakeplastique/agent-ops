@@ -42,6 +42,10 @@ class Settings(BaseSettings):
     webhooks_allow_http: bool = False
     # `kid:base64(32 bytes),...` (AES-256-GCM for stored webhook secrets); the last seals, all open.
     webhook_secret_keys: str = DEV_WEBHOOK_SECRET_KEYS
+    # Telegram (D19). No token = nothing is sent; no webhook secret = the webhook answers 404.
+    telegram_bot_token: str = ""
+    telegram_webhook_secret: str = ""
+    telegram_bot_username: str = ""  # for the t.me deep link
 
     @field_validator("database_url", "migrate_database_url", "worker_database_url")
     @classmethod

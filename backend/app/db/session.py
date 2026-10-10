@@ -13,7 +13,10 @@ async def use_tenant(conn: AsyncConnection, org_id: uuid.UUID) -> None:
     )
 
 
-LOOKUP_KEYS = frozenset({"app.self_user_id", "app.invite_hash", "app.receipt_request_id"})
+LOOKUP_KEYS = frozenset({
+    "app.self_user_id", "app.invite_hash", "app.receipt_request_id",
+    "app.telegram_code_hash", "app.telegram_handle_hash", "app.telegram_chat_id",
+})  # fmt: skip
 
 
 async def lookup_as(conn: AsyncConnection, key: str, value: str) -> None:

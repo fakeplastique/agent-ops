@@ -115,6 +115,10 @@ EXEMPT: set[str] = {
     "/api/v1/escalation-policies",  # same; a foreign team_id is 404 (tests/api/test_policies.py)
     "/api/v1/organizations/current/plan",  # the caller's own organization, no id parameter
     "/api/v1/webhook-subscriptions",  # create and list: the tenant comes from the caller
+    "/api/v1/me/telegram",  # the caller's own link state and unlink, no id parameter
+    "/api/v1/me/telegram/link-code",  # a code for the caller themselves
+    # Telegram's updates: the tenant comes from the stored button handle, never the update (S31 tests)
+    "/api/v1/telegram/webhook",
     # Cross-tenant by design for platform admins; everyone else gets 403 before any id is read
     # (tests/integration/test_flag_paths.py::test_platform_admin_only_from_env_allowlist).
     "/api/v1/platform/organizations/{organization_id}/plan",
