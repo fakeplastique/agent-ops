@@ -1,0 +1,35 @@
+import type { ReactNode } from "react";
+
+import { Brand } from "@/components/shell/Shell";
+
+/** Screens before the app (sign in, onboarding, invitations): the tinted frame with one narrow sheet, no nav. */
+export function AuthFrame({ title, lead, children }: { title: string; lead?: ReactNode; children: ReactNode }) {
+  return (
+    <main className="grid min-h-dvh place-items-center bg-ground p-inset">
+      <div className="flex w-full max-w-(--measure) flex-col gap-6 rounded-sheet border border-border bg-surface p-6">
+        <Brand />
+        <div className="flex flex-col gap-2">
+          <h1 className="m-0">{title}</h1>
+          {lead && <p className="m-0 text-muted">{lead}</p>}
+        </div>
+        {children}
+      </div>
+    </main>
+  );
+}
+
+/** A problem the user can act on: what happened, then what to do. Announced once when it appears. */
+export function Notice({ title, children }: { title: string; children?: ReactNode }) {
+  return (
+    <div role="alert" className="flex flex-col gap-1 rounded-card bg-raised px-4 py-3">
+      <p className="m-0 font-medium">{title}</p>
+      {children && <div className="m-0 text-muted">{children}</div>}
+    </div>
+  );
+}
+
+export const primaryButton =
+  "inline-flex h-control items-center justify-center rounded-control bg-text px-4 font-medium text-surface no-underline transition-opacity hover:opacity-85 max-lg:h-touch aria-disabled:cursor-default aria-disabled:opacity-60";
+
+export const secondaryButton =
+  "inline-flex h-control items-center justify-center rounded-control bg-active px-4 font-medium text-text no-underline transition-colors hover:bg-control max-lg:h-touch aria-disabled:cursor-default aria-disabled:opacity-60";
