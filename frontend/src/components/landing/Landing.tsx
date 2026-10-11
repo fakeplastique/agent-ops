@@ -1,6 +1,8 @@
 /* eslint-disable @next/next/no-img-element -- four small, pre-sized archival JPEGs served as static files */
 import "./landing.css";
 
+import { Earth } from "./Earth/Earth";
+import { Orb } from "./Orb/Orb";
 import { ReceiptDemo } from "./ReceiptDemo";
 import type { Receipt } from "./receipt";
 
@@ -83,8 +85,10 @@ function Mark({ className }: { className?: string }) {
 function Hero() {
   return (
     <section className="ln-hero" aria-label="Agent Ops">
-      {/* Slot for S47: the WebGL silk shader mounts inside this circle. Plain accent without it. */}
-      <div className="ln-orb" data-slot="orb" aria-hidden="true" />
+      {/* Plain accent circle; the silk shader draws into it when WebGL is available. */}
+      <div className="ln-orb" aria-hidden="true">
+        <Orb />
+      </div>
       <div className="ln-in ln-hero-in">
         <h1>
           Agents ask.
@@ -134,21 +138,6 @@ function Hero() {
           </div>
         </div>
       </div>
-    </section>
-  );
-}
-
-function LiveBand() {
-  return (
-    <section className="ln-live" id="live" aria-labelledby="live-h">
-      <div className="ln-in">
-        <h2 id="live-h">Receipts, one after another.</h2>
-        <p className="ln-cap">
-          A simulated feed: the page makes up the requests to show the rhythm. Your real numbers come from your own approvals.
-        </p>
-      </div>
-      {/* Slot for S47: the turning dot-matrix earth, agents and receipts draw here. */}
-      <div className="ln-globe" data-slot="earth" aria-hidden="true" />
     </section>
   );
 }
@@ -397,7 +386,7 @@ export function Landing({ receipt }: { receipt: Receipt }) {
       </header>
       <main id="top">
         <Hero />
-        <LiveBand />
+        <Earth />
         <Stages />
         <ReceiptDemo receipt={receipt} />
         <Rules />

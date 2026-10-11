@@ -168,6 +168,14 @@
   background: var(--accent);
 }
 
+.ln-orb-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+}
+
 .ln-hero-in {
   position: relative;
 }
@@ -336,7 +344,7 @@
   text-decoration: none;
 }
 
-/* live band: S47 draws the earth into .ln-globe */
+/* live band: the earth canvas (.ln-globe) is drawn by Earth/ */
 .ln-live {
   --g: clamp(26rem, 44vw, 43.75rem);
   position: relative;
@@ -357,6 +365,15 @@
   font-size: var(--ln-head);
 }
 
+.ln-count {
+  margin-top: clamp(1.75rem, 4vw, 3.5rem);
+  font-size: var(--ln-giant);
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  line-height: 0.95;
+  font-variant-numeric: tabular-nums;
+}
+
 .ln-cap {
   max-width: 30ch;
   margin-top: 1.5rem;
@@ -365,6 +382,7 @@
 }
 
 .ln-globe {
+  display: block;
   position: absolute;
   right: -4vw;
   top: 50%;
@@ -387,8 +405,8 @@
     transform: none;
   }
 
-  .ln-globe:empty {
-    display: none;
+  .ln-globe {
+    height: auto;
   }
 }
 
