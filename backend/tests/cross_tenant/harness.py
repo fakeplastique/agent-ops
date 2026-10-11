@@ -97,6 +97,8 @@ EXEMPT: set[str] = {
     "/api/v1/auth/logout",
     "/api/v1/auth/session",
     "/api/v1/auth/organization",
+    "/api/v1/auth/demo/users",  # DEMO_MODE roster of seeded sign-ins, no tenant id in or out
+    "/api/v1/auth/demo/login",
     # Organization/invitation/member lists and creates take no foreign id: the tenant comes from the caller.
     "/api/v1/organizations",
     "/api/v1/invitations",

@@ -62,6 +62,7 @@ PLAN = {("post", "/api/v1/decision-requests"), ("post", "/api/v1/escalation-poli
 PLAN |= {("get", "/api/v1/stats/summary"), ("get", "/api/v1/stats/timeseries")}  # analytics gate
 PUBLIC = {"/healthz", "/readyz", "/api/v1/auth/login", "/api/v1/auth/callback"}
 PUBLIC |= {"/api/v1/auth/logout", "/api/v1/receipts/verify"}
+PUBLIC |= {"/api/v1/auth/demo/users", "/api/v1/auth/demo/login"}  # DEMO_MODE only, 404 otherwise
 UNLIMITED = {"/api/v1/auth/logout", "/api/v1/auth/organization"}  # session-only, no write limit
 NO_ROLE = {"/api/v1/auth/session", "/api/v1/me"}  # identity reads: any valid credential passes
 

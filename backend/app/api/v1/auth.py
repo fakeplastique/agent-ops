@@ -6,7 +6,15 @@ from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-from app.api.deps import COOKIE, ClockDep, EngineDep, OidcDep, RedisDep, SessionDep
+from app.api.deps import (
+    COOKIE,
+    ClockDep,
+    EngineDep,
+    OidcDep,
+    RedisDep,
+    SessionDep,
+    public_limit,
+)
 from app.api.errors import error_responses
 from app.authz.origin import require_same_origin
 from app.config import settings
@@ -126,13 +134,17 @@ class DemoLoginIn(BaseModel):
     email: str
 
 
-@router.get("/demo/users", dependencies=[Depends(demo_only)])
+@router.get("/demo/users", dependencies=[Depends(demo_only)], responses=error_responses(404))
 async def demo_users(engine: EngineDep) -> dict[str, Any]:
     """The seeded users the login page offers as "Sign in as" buttons."""
     return {"users": await demo.seeded_users(engine)}
 
 
-@router.post("/demo/login", dependencies=[Depends(demo_only), Depends(require_same_origin)])
+@router.post(
+    "/demo/login",
+    dependencies=[Depends(demo_only), Depends(require_same_origin), Depends(public_limit)],
+    responses=error_responses(404),
+)
 async def demo_login(
     body: DemoLoginIn, request: Request, response: Response, engine: EngineDep, clock: ClockDep
 ) -> dict[str, Any]:
