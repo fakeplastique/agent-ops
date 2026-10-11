@@ -67,11 +67,21 @@ export function startSilk(cv: HTMLCanvasElement, hero: Element, o: { still: bool
     gl.uniform1f(uPA, press ? clock - press.t : -1);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   };
+  let lost = false;
+  let stopLoop = () => {};
+  // A lost context draws nothing: stop the loop and let the plain teal orb show.
+  const onLost = (e: Event) => {
+    e.preventDefault();
+    lost = true;
+    stopLoop();
+  };
+  cv.addEventListener("webglcontextlost", onLost);
   size();
   draw();
   const ro = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(() => (size(), draw()));
   ro?.observe(cv);
-  if (o.still) return () => ro?.disconnect(); // reduced motion: one frame, no loop, no pointer handling
+  const unlisten = () => cv.removeEventListener("webglcontextlost", onLost);
+  if (o.still) return () => (ro?.disconnect(), unlisten()); // reduced motion: one frame, no loop, no pointer handling
 
   const onDown = (e: Event) => {
     const ev = e as PointerEvent;
@@ -89,7 +99,7 @@ export function startSilk(cv: HTMLCanvasElement, hero: Element, o: { still: bool
   };
   hero.addEventListener("pointerdown", onDown);
   hero.addEventListener("pointermove", onMove);
-  const stop = runWhileVisible(
+  stopLoop = runWhileVisible(
     hero,
     (_now, dt) => {
       clock += dt;
@@ -97,12 +107,13 @@ export function startSilk(cv: HTMLCanvasElement, hero: Element, o: { still: bool
       light[0] += (goal[0] - light[0]) * k;
       light[1] += (goal[1] - light[1]) * k;
       if (press && clock - press.t > 4) press = null;
-      draw();
+      if (!lost) draw();
     },
     32, // 30 fps is plenty for slow silk
   );
   return () => {
-    stop();
+    stopLoop();
+    unlisten();
     ro?.disconnect();
     hero.removeEventListener("pointerdown", onDown);
     hero.removeEventListener("pointermove", onMove);

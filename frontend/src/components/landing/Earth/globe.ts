@@ -18,6 +18,7 @@ const HUBS = [
 ];
 const AGENTS = [0, 1, 3, 4, 7, 9, 12]; // hub indexes where an agent lives
 const TAU = Math.PI * 2;
+const STILL_GAP = 0.03; // seconds between redraws in reduced motion
 
 const xyz = (lat: number, lon: number) => {
   const a = (lat * Math.PI) / 180;
@@ -63,11 +64,18 @@ export function createGlobe(cv: HTMLCanvasElement, o: GlobeOpts) {
   let sy = 0;
   let fl: Flight[] = [];
   let fx: Flash[] = [];
+  let sinceDraw = 0;
+  let wasFlashing = false;
 
+  // Writes into one shared triple (callers read it before the next call): no allocation per dot per frame.
+  const P = [0, 0, 0];
   const proj = (x: number, y: number, z: number) => {
     const x1 = x * cy + z * sy;
     const z1 = -x * sy + z * cy;
-    return [x1, y * ct - z1 * st, y * st + z1 * ct];
+    P[0] = x1;
+    P[1] = y * ct - z1 * st;
+    P[2] = y * st + z1 * ct;
+    return P;
   };
   // Point at fraction t along the great circle a->b, lifted off the surface so the flight reads as an arc.
   const arc = (a: number, b: number, t: number) => {
@@ -238,7 +246,14 @@ export function createGlobe(cv: HTMLCanvasElement, o: GlobeOpts) {
       return false;
     });
     fx = fx.filter((f) => clock - f.t < 1.6);
-    draw();
+    sinceDraw += dt;
+    if (!o.still) return draw();
+    // Reduced motion: only receipt flashes change the picture, so draw at ~30 fps while one shows (and once more to clear it).
+    if (sinceDraw < STILL_GAP) return;
+    sinceDraw = 0;
+    const flashing = fx.length > 0;
+    if (flashing || wasFlashing) draw();
+    wasFlashing = flashing;
   };
 
   resize();
