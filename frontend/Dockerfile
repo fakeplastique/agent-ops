@@ -8,6 +8,7 @@ COPY package.json pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile
 COPY next.config.ts tsconfig.json ./
 COPY src ./src
+COPY public ./public
 RUN pnpm build && chown -R node:node /srv
 USER node
 CMD ["sh", "-c", "pnpm start -p ${PORT:-3000}"]

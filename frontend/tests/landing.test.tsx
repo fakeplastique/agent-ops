@@ -46,6 +46,20 @@ describe("Landing", () => {
     expect(html.match(/<h1/g)).toHaveLength(1);
   });
 
+  // CC BY needs the licence, the source and a note that the picture was changed; "Sign in" must reach the login.
+  it("credits link to licence and source, and say the pictures were cropped and resized", async () => {
+    const html = renderToString(await Page());
+    expect(html).toContain('href="https://creativecommons.org/licenses/by/4.0/"');
+    expect(html).toMatch(/href="https:\/\/commons\.wikimedia\.org\/[^"]*Mister[^"]*"/);
+    expect(html).toMatch(/cropped and resized/i);
+    expect(html).toMatch(/<a[^>]*href="\/login"[^>]*>Sign in</);
+  });
+
+  // public/ is not copied into the web image unless the Dockerfile says so: the pictures would 404 in production.
+  it("the web image ships public/ (the credited pictures and the land mask)", () => {
+    expect(readFileSync(join(SRC, "../Dockerfile"), "utf8")).toMatch(/^COPY public \.\/public$/m);
+  });
+
   it("uses the four credited pictures that exist on disk", async () => {
     const html = renderToString(await Page());
     const srcs = [...html.matchAll(/<img[^>]+src="(\/landing\/[^"]+)"/g)].map((m) => m[1]);
@@ -93,6 +107,20 @@ describe("Receipt", () => {
     expect(await verifyReceipt(r, "")).toBe(false);
     expect(await verifyReceipt({ ...r, signature: "0".repeat(64) }, "1240")).toBe(false);
     expect(await verifyReceipt({ ...r, kid: "other" }, "1240")).toBe(false);
+  });
+
+  // "Never throws" must hold when WebCrypto itself rejects: the verdict may not stay "valid".
+  it("a rejecting WebCrypto is 'not valid', in the helper and on screen", async () => {
+    const r = await issueReceipt();
+    const user = userEvent.setup();
+    render(<ReceiptDemo receipt={r} />);
+    const amount = await screen.findByLabelText("Amount (USD)");
+    await waitFor(() => expect(amount).toBeEnabled());
+    vi.spyOn(crypto.subtle, "sign").mockRejectedValue(new Error("boom"));
+    expect(await verifyReceipt(r, "1240")).toBe(false);
+    await user.type(amount, "1");
+    expect(await screen.findByRole("heading", { name: "Broken." })).toBeInTheDocument();
+    vi.restoreAllMocks();
   });
 
   it("editing the amount flips 'Signed' to 'Broken' using WebCrypto HMAC with the labelled demo key", async () => {

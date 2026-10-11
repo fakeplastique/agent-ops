@@ -19,11 +19,11 @@ export function ReceiptDemo({ receipt }: { receipt: Receipt }) {
     setAmount(value);
     const id = ++latest.current;
     const n = value.trim() === "" ? NaN : Number(value);
-    Promise.all([verifyReceipt(receipt, value), Number.isFinite(n) ? contentHash(n) : Promise.resolve("")]).then(
-      ([ok, hash]) => {
+    Promise.all([verifyReceipt(receipt, value), Number.isFinite(n) ? contentHash(n) : Promise.resolve("")])
+      .catch(() => [false, ""] as const) // a failed hash is shown as not valid, never left at the old verdict
+      .then(([ok, hash]) => {
         if (id === latest.current) setCheck({ ok, hash });
-      },
-    );
+      });
   };
 
   const { ok, hash } = check;

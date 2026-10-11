@@ -1146,8 +1146,18 @@
   font-size: var(--ln-small);
 }
 
-.ln-last p {
+.ln-credits {
   max-width: 70ch;
+}
+
+.ln-credits ul {
+  margin: 0.25rem 0;
+  padding-left: 1.25rem;
+}
+
+.ln-credits a {
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
 }
 
 @media (max-width: 760px) {

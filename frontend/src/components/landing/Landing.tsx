@@ -60,6 +60,16 @@ const ART: Record<string, React.ReactNode> = {
   t8: <span className="ln-big">60</span>,
 };
 
+const COMMONS = "https://commons.wikimedia.org/w/index.php?search=";
+const CC = "https://creativecommons.org/";
+// [title, creator, [licence name, link] or ["", "public domain"], source (a Commons search for the title)]
+const PICTURES = [
+  ["Almond-shaped seal matrix", "Cleveland Museum of Art", ["CC0", `${CC}publicdomain/zero/1.0/`], `${COMMONS}almond-shaped+seal+Cleveland+Museum+of+Art`],
+  ["Mexico 1901 notary sealing stamp", "unknown author", ["", "public domain"], `${COMMONS}notary+sealing+stamp+Mexico+1901`],
+  ["Savings book", "Polish Postal Savings Bank", ["", "public domain"], `${COMMONS}savings+book+Pocztowa+Kasa+Oszczednosci`],
+  ["Account-book of Thomas Mister", "Wellcome Collection", ["CC BY 4.0", `${CC}licenses/by/4.0/`], `${COMMONS}Account-book+of+Thomas+Mister+Wellcome`],
+] as const;
+
 const FAQ = [
   ["Scope", "Do you run my agents?", "No. Agent Ops never runs an agent. Yours send decision requests over MCP or REST, and read the result and the receipt back."],
   ["Trust", "What if all the reviewers agree?", "Agreement is not proof. Only low-risk actions that an admin has marked low skip the people, and an action type nobody has classified counts as medium."],
@@ -332,7 +342,7 @@ function Footer() {
             <h3>Try it</h3>
             <ul>
               <li><a href={DEMO}>Open the demo</a></li>
-              <li><a href={DEMO}>Sign in</a></li>
+              <li><a href="/login">Sign in</a></li>
             </ul>
           </div>
           <div>
@@ -345,12 +355,21 @@ function Footer() {
           </div>
         </div>
         <div className="ln-last">
-          <p>
-            Agent Ops. Pictures via Wikimedia Commons: almond-shaped seal, Cleveland Museum of Art, CC0; Mexico 1901 notary
-            sealing stamp, public domain; savings book, Polish Postal Savings Bank, public domain; Account-book of Thomas
-            Mister, Wellcome Collection, CC BY 4.0. Agent icon “ai agent” by Maassam Mohammed Anis, Noun Project. Land
-            outlines: Natural Earth, public domain.
-          </p>
+          <div className="ln-credits">
+            <p>
+              Agent Ops. Pictures, all cropped and resized for this page, via Wikimedia Commons:
+            </p>
+            <ul>
+              {PICTURES.map(([title, by, licence, source]) => (
+                <li key={title}>
+                  <a href={source}>{title}</a>, {by}, {licence[0] ? <a href={licence[1]}>{licence[0]}</a> : licence[1]}
+                </li>
+              ))}
+            </ul>
+            <p>
+              Agent icon “ai agent” by Maassam Mohammed Anis, Noun Project. Land outlines: Natural Earth, public domain.
+            </p>
+          </div>
           <a className="ln-btn ln-light" href="#top">
             Back to top
           </a>

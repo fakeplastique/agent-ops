@@ -67,6 +67,14 @@ export async function issueReceipt(): Promise<Receipt> {
 
 // Never throws: anything unparseable or unsigned is simply not valid.
 export async function verifyReceipt(receipt: Receipt, liveAmount: string): Promise<boolean> {
+  try {
+    return await check(receipt, liveAmount);
+  } catch {
+    return false; // WebCrypto itself failed: nothing was proven
+  }
+}
+
+async function check(receipt: Receipt, liveAmount: string): Promise<boolean> {
   const amount = liveAmount.trim() === "" ? NaN : Number(liveAmount);
   if (!Number.isFinite(amount) || receipt.kid !== DEMO_KID || receipt.alg !== "HS256") return false;
   if ((await mac(receipt.kid, receipt.payload)) !== receipt.signature) return false;
