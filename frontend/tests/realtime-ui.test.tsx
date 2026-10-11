@@ -31,6 +31,20 @@ describe("ConnectionBanner", () => {
     expect(screen.queryByText(/Live updates paused/)).not.toBeInTheDocument();
   });
 
+  // After 401/403 the client has stopped: saying "reconnecting" would be a lie.
+  it("stopped says why and does not claim to be reconnecting", () => {
+    render(
+      <RealtimeProvider make={make as never}>
+        <ConnectionBanner />
+      </RealtimeProvider>,
+    );
+    act(() => opts.onState?.({ status: "stopped", transport: null, reason: "unauthenticated" }));
+    expect(screen.getByRole("status")).toHaveTextContent("Live updates stopped: you are signed out");
+    expect(screen.queryByText(/reconnecting/)).not.toBeInTheDocument();
+    act(() => opts.onState?.({ status: "stopped", transport: null, reason: "forbidden" }));
+    expect(screen.getByRole("status")).toHaveTextContent("Live updates stopped: you no longer have access");
+  });
+
   // A banner or update that steals focus or scrolls would jump the list under the user's cursor.
   it("focus and scroll are unchanged by connection changes and updates", async () => {
     const scroll = vi.spyOn(window, "scrollTo").mockImplementation(() => {});
