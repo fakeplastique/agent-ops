@@ -17,7 +17,7 @@ type Props = {
   inboxCount?: number;
 };
 
-function Brand() {
+export function Brand() {
   return (
     <span className="flex items-center gap-2 px-1 text-section font-semibold">
       <svg viewBox="0 0 24 24" aria-hidden="true" className="size-5 flex-none text-accent">
