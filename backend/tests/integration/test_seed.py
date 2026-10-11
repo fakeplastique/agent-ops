@@ -216,3 +216,54 @@ async def test_demo_users_lists_only_seeded_users(web, owner_engine, monkeypatch
     monkeypatch.setattr(settings, "demo_mode", True)
     await _wipe(owner_engine)
     assert (await web.client.get("/api/v1/auth/demo/users")).json() == {"users": []}
+
+
+async def test_reseed_converges_a_plan_left_behind_by_an_interrupted_run(
+    seeded, app_engine, owner_engine
+):
+    # catches: org created but never upgraded (a crash between the two steps), then every re-run failing
+    async with owner_engine.begin() as c:
+        await c.execute(
+            text("delete from escalation_policies where organization_id = :o"), {"o": ACME}
+        )
+        await c.execute(
+            text("update organizations set plan_key = 'free' where id = :o"), {"o": ACME}
+        )
+    again = await demo.seed(app_engine, CLOCK, KEYS)
+    assert again.secrets == {}
+    plan = await _one(owner_engine, "select plan_key from organizations where id = :o", o=ACME)
+    assert plan == "pro"
+    sql = "select levels from escalation_policies where organization_id = :o"
+    assert len(await _one(owner_engine, sql, o=ACME)) == 3
+
+
+async def test_failed_demo_sign_in_keeps_the_previous_session_and_leaves_no_row(
+    seeded, web, owner_engine, monkeypatch
+):
+    # catches: a refused sign-in deleting the caller's session or leaving an orphan one
+    monkeypatch.setattr(settings, "demo_mode", True)
+    ok = await web.post("/api/v1/auth/demo/login", json={"email": "lead@acme.demo"})
+    assert ok.status_code == 200
+    async with owner_engine.begin() as c:
+        await c.execute(
+            text(
+                "delete from memberships"
+                " where user_id = (select id from users where email = 'member@acme.demo')"
+            )
+        )
+    before = await _one(owner_engine, "select count(*) from web_sessions")
+    refused = await web.post("/api/v1/auth/demo/login", json={"email": "member@acme.demo"})
+    assert refused.status_code == 404
+    assert await _one(owner_engine, "select count(*) from web_sessions") == before
+    assert (await web.client.get("/api/v1/auth/session")).status_code == 200  # still the lead
+
+
+async def test_demo_roster_is_rate_limited_and_the_email_bounded(seeded, web, monkeypatch):
+    # catches: an unauthenticated read that fans out queries without a limit; an unbounded body field
+    monkeypatch.setattr(settings, "demo_mode", True)
+    monkeypatch.setattr(settings, "write_limit_per_principal", 2)
+    codes = [(await web.client.get("/api/v1/auth/demo/users")).status_code for _ in range(3)]
+    assert codes == [200, 200, 429]
+    monkeypatch.setattr(settings, "write_limit_per_principal", 60)
+    long = await web.post("/api/v1/auth/demo/login", json={"email": "a" * 300 + "@acme.demo"})
+    assert long.status_code == 422

@@ -3,7 +3,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, Request, Response
 from fastapi.responses import RedirectResponse
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.api.deps import (
@@ -131,10 +131,14 @@ async def demo_only() -> None:
 
 class DemoLoginIn(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    email: str
+    email: str = Field(max_length=254)
 
 
-@router.get("/demo/users", dependencies=[Depends(demo_only)], responses=error_responses(404))
+@router.get(
+    "/demo/users",
+    dependencies=[Depends(demo_only), Depends(public_limit)],
+    responses=error_responses(404),
+)
 async def demo_users(engine: EngineDep) -> dict[str, Any]:
     """The seeded users the login page offers as "Sign in as" buttons."""
     return {"users": await demo.seeded_users(engine)}

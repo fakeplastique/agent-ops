@@ -61,6 +61,17 @@ async def find_user(engine: AsyncEngine, email: str) -> uuid.UUID | None:
         return (await conn.execute(_FIND_USER, {"e": email})).scalar()
 
 
+async def existing_users(engine: AsyncEngine, emails: list[str]) -> set[str]:
+    """Which of these lower-cased emails have a user: one transaction (the policy shows one email at a time)."""
+    async with engine.begin() as conn:
+        found = set()
+        for e in emails:
+            await conn.execute(_SET_EMAIL, {"e": e})
+            if (await conn.execute(_FIND_USER, {"e": e})).scalar() is not None:
+                found.add(e)
+        return found
+
+
 async def end_session(engine: AsyncEngine, raw: str | None) -> None:
     if not raw:
         return

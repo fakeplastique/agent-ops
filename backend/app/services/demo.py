@@ -139,10 +139,11 @@ def roster() -> list[tuple[DemoOrg, DemoUser]]:
 
 async def seeded_users(engine: AsyncEngine) -> list[dict[str, str]]:
     """The roster users that exist now (an unseeded database lists nobody)."""
+    have = await web_sessions.existing_users(engine, [u.email for _, u in roster()])
     return [
         {"email": u.email, "name": u.name, "role": u.role, "organization": o.name}
         for o, u in roster()
-        if await web_sessions.find_user(engine, u.email) is not None
+        if u.email in have
     ]
 
 
@@ -155,6 +156,8 @@ async def sign_in(
     if found is None or user is None:
         raise NotFoundError
     org = org_id(found[0].slug)
+    if await web_sessions.role_in(engine, user, org) is None:  # before any session is touched
+        raise NotFoundError
     raw = await web_sessions.start_session(engine, user, clock, previous)
     return raw, user, org, await web_sessions.select_organization(engine, raw, user, org)
 
@@ -183,9 +186,9 @@ async def _seed_org(
     admin = ids[next(u.email for u in spec.users if u.role == "org_admin")]
     if not await _exists(engine, org):
         await members.create_organization(engine, admin, spec.name, spec.slug, org)
-        if spec.plan != "free":  # before the policy: a Free org cannot hold a three-level one
-            async with tenant_session(engine, org) as s:
-                await plans.change_plan(s, org, spec.plan, admin, "demo")
+    async with tenant_session(engine, org) as s:  # every run, so an interrupted one still converges
+        if await s.scalar(text("select plan_key from organizations")) != spec.plan:
+            await plans.change_plan(s, org, spec.plan, admin, "demo")  # before the policy
 
     async with tenant_session(engine, org) as s:
         team_ids = await _teams(s, org, admin, spec)
