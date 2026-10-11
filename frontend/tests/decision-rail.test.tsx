@@ -54,9 +54,25 @@ describe("time helpers", () => {
     expect(windowUsed(s, d, START + 90 * MIN)).toEqual({ usedMin: 60, windowMin: 60, percent: 100 });
   });
 
-  it("clockTime renders HH:MM", () => {
-    expect(clockTime(iso(START))).toMatch(/^\d{2}:\d{2}$/);
-    expect(clockTime("nope")).toBe("");
+  it("used is window minus left, one rule: 48.5 min left is 48 left and 12 of 60 used", () => {
+    const now = START + 11.5 * MIN;
+    expect(timeLeft(START + 60 * MIN, now)!.label).toBe("48 min left");
+    expect(windowUsed(iso(START), iso(START + 60 * MIN), now)).toEqual({ usedMin: 12, windowMin: 60, percent: 20 });
+    for (const s of [0, 1, 29_999, 30_000, 59_999, 61_000, 3_599_000]) {
+      const u = windowUsed(iso(START), iso(START + 60 * MIN), START + s)!;
+      const left = Math.floor(timeLeft(START + 60 * MIN, START + s)?.ms ?? 0) / MIN;
+      expect(u.usedMin + Math.max(0, Math.floor(left))).toBe(60);
+    }
+  });
+
+  it("a window under 30 seconds has no usable minutes, so no used figure", () => {
+    expect(windowUsed(iso(START), iso(START + 20_000), START + 5_000)).toBeNull();
+  });
+
+  it("clockTime renders HH:MM today and adds the date when due is not today", () => {
+    expect(clockTime(iso(START), START)).toMatch(/^\d{2}:\d{2}$/);
+    expect(clockTime(iso(START + 30 * 60 * MIN), START)).toMatch(/^\d{1,2} \w{3} \d{2}:\d{2}$/);
+    expect(clockTime("nope", START)).toBe("");
   });
 });
 
@@ -72,7 +88,7 @@ describe("DecisionRail", () => {
     const { rerender } = render(rail());
     expect(screen.getByText("49 min left")).toBeInTheDocument();
     expect(screen.getByText(/11 of 60 min used/)).toBeInTheDocument();
-    expect(screen.getByText(new RegExp(`due ${clockTime(iso(START + 60 * MIN))}`))).toBeInTheDocument();
+    expect(screen.getByText(new RegExp(`due ${clockTime(iso(START + 60 * MIN), START + 11 * MIN)}`))).toBeInTheDocument();
 
     const clock = { ...base.clock!, dueAt: iso(START + 120 * MIN) };
     rerender(rail({ clock }));
@@ -97,13 +113,16 @@ describe("DecisionRail", () => {
     expect(document.body.textContent).not.toMatch(/NaN/);
   });
 
-  it("ticks the time left with the clock when no fixed now is given", () => {
-    vi.useFakeTimers({ now: START + 11 * MIN });
+  it("ticks on the minute boundary so the label never promises more than remains", () => {
+    vi.useFakeTimers({ now: START + 11.5 * MIN });
     try {
       render(rail({ clock: { startedAt: iso(START), dueAt: iso(START + 60 * MIN) } }));
-      expect(screen.getByText("49 min left")).toBeInTheDocument();
-      act(() => void vi.advanceTimersByTime(2 * MIN));
+      expect(screen.getByText("48 min left")).toBeInTheDocument();
+      act(() => void vi.advanceTimersByTime(29_000));
+      expect(screen.getByText("48 min left")).toBeInTheDocument();
+      act(() => void vi.advanceTimersByTime(2_000));
       expect(screen.getByText("47 min left")).toBeInTheDocument();
+      expect(screen.getByText(/13 of 60 min used/)).toBeInTheDocument();
     } finally {
       vi.useRealTimers();
     }
@@ -144,8 +163,56 @@ describe("DecisionRail", () => {
     expect(items[items.length - 1]).toHaveTextContent("Signed when approved");
   });
 
+  it("fractional minutes: time left and used agree and the label is never ahead of the clock", () => {
+    render(rail({ clock: { ...base.clock!, now: START + 11.5 * MIN } }));
+    expect(screen.getByText("48 min left")).toBeInTheDocument();
+    expect(screen.getByText(/12 of 60 min used/)).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: /12 of 60 minutes used, 20 percent/ })).toBeInTheDocument();
+  });
+
+  it("a due time days away carries its date", () => {
+    render(rail({ clock: { startedAt: iso(START), dueAt: iso(START + 30 * 60 * MIN), now: START } }));
+    expect(screen.getByText(/due \d{1,2} \w{3} \d{2}:\d{2}/)).toBeInTheDocument();
+  });
+
+  it("blind round counts reviewers, and never says '0 of N' when the count is unknown", () => {
+    const { rerender } = render(rail({ quorum: { need: 3, approved: 0, voted: 2, reviewers: 5, blind: true } }));
+    expect(screen.getAllByRole("listitem")[0]).toHaveTextContent("2 of 5 voted");
+    rerender(rail({ quorum: { need: 3, approved: 0, voted: 2, blind: true } }));
+    expect(screen.getAllByRole("listitem")[0]).toHaveTextContent("2 voted");
+    rerender(rail({ quorum: { need: 3, approved: 0, blind: true } }));
+    const q = screen.getAllByRole("listitem")[0];
+    expect(q).not.toHaveTextContent(/0 of|of 3|0 voted/);
+    expect(q).toHaveTextContent("Vote hidden until round closes");
+  });
+
+  it("a finished rail has no 'Current' step and no doubled state words", () => {
+    render(
+      rail({
+        outcome: "rejected",
+        clock: undefined,
+        quorum: { need: 3, approved: 1 },
+        levels: [{ level: 1, role: "Reviewer", state: "current" }],
+      }),
+    );
+    expect(document.body.textContent).not.toMatch(/Current/);
+    expect(document.body.textContent).not.toMatch(/Rejected\. Rejected/);
+  });
+
+  it("open levels say 'Not started' once", () => {
+    render(rail());
+    const open = screen.getAllByRole("listitem")[3];
+    expect(open.textContent!.match(/Not started/g)).toHaveLength(1);
+  });
+
+  it("is a real list and the heading level is the caller's", () => {
+    render(rail({ headingLevel: 2 }));
+    expect(screen.getByRole("list")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: /Where it stands/ })).toBeInTheDocument();
+  });
+
   it("blind round shows 'vote hidden until round closes', no verdict marks", () => {
-    render(rail({ quorum: { need: 3, approved: 2, voted: 2, blind: true } }));
+    render(rail({ quorum: { need: 3, approved: 2, voted: 2, reviewers: 3, blind: true } }));
     const quorum = screen.getAllByRole("listitem")[0];
     expect(quorum).toHaveTextContent("Vote hidden until round closes");
     expect(quorum).toHaveTextContent("2 of 3 voted");
@@ -172,7 +239,7 @@ describe("DecisionRail", () => {
     const items = screen.getAllByRole("listitem");
     for (const item of items) {
       // Every node names its state in text; the dot's glyph is decoration.
-      expect(item.querySelector(".sr-only")?.textContent).toMatch(/Done|Current|Not started|Rejected|Signed|Not signed/);
+      expect(item.textContent).toMatch(/Done|Current|Not started|Rejected|Signed|Not signed/);
     }
     for (const d of items.filter((i) => i.getAttribute("data-state") === "done")) {
       expect(d.querySelector("svg")).not.toBeNull();

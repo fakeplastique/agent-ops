@@ -29,22 +29,30 @@ export function timeLeft(dueAt: string | number | Date, now: number): TimeLeft |
   return { ms: left, tone: warn ? "warning" : "normal", note: warn ? "Due soon" : undefined, label: `${span(minutes)} left` };
 }
 
-/** The window and how much of it is used, from the same two instants as timeLeft. Null if not a positive window. */
+/** Window and used minutes, with used = window - left (left floored as in timeLeft) so the two figures always add up. */
 export function windowUsed(startedAt: string | number | Date, dueAt: string | number | Date, now: number) {
   const start = ms(startedAt);
   const due = ms(dueAt);
-  const window = due - start;
-  if (Number.isNaN(window) || window <= 0) return null;
-  const used = Math.min(Math.max(now - start, 0), window);
-  return {
-    usedMin: Math.floor(used / MIN),
-    windowMin: Math.round(window / MIN),
-    percent: Math.round((100 * used) / window),
-  };
+  const windowMin = Math.round((due - start) / MIN);
+  if (Number.isNaN(windowMin) || windowMin < 1) return null;
+  const leftMin = Math.floor(Math.max(due - now, 0) / MIN);
+  const usedMin = Math.min(Math.max(windowMin - leftMin, 0), windowMin);
+  return { usedMin, windowMin, percent: Math.round((100 * usedMin) / windowMin) };
 }
 
-/** Local HH:MM, or "" for an invalid date. */
-export function clockTime(at: string | number | Date): string {
+/** Next instant the floored minute count changes: the delay to the next whole-minute boundary of dueAt, or null. */
+export function msToNextMinute(dueAt: string | number | Date, now: number): number | null {
+  const due = ms(dueAt);
+  if (Number.isNaN(due)) return null;
+  return (((due - now) % MIN) + MIN) % MIN;
+}
+
+/** Local HH:MM, prefixed with the date ("4 Nov 20:00") when it is not the same local day as now. Empty if invalid. */
+export function clockTime(at: string | number | Date, now: number): string {
   const t = ms(at);
-  return Number.isNaN(t) ? "" : new Date(t).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+  if (Number.isNaN(t)) return "";
+  const d = new Date(t);
+  const hm = d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+  if (d.toDateString() === new Date(now).toDateString()) return hm;
+  return `${d.toLocaleDateString("en-GB", { day: "numeric", month: "short" })} ${hm}`;
 }

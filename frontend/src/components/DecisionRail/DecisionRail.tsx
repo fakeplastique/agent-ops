@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { createElement, useEffect, useState, type CSSProperties, type ReactNode } from "react";
 
-import { clockTime, timeLeft, windowUsed } from "@/lib/time";
+import { clockTime, msToNextMinute, timeLeft, windowUsed } from "@/lib/time";
 
 export type Risk = "low" | "medium" | "high";
 export type RailLevel = {
@@ -12,14 +12,15 @@ export type RailLevel = {
   note?: string;
 };
 export type RailProps = {
-  /** In a blind round only `voted` is shown: approvals would leak the verdict. */
-  quorum: { need: number; approved: number; voted?: number; blind?: boolean; revealedAt?: string };
+  /** In a blind round only `voted` of `reviewers` is shown: approvals would leak the verdict. */
+  quorum: { need: number; approved: number; voted?: number; reviewers?: number; blind?: boolean; revealedAt?: string };
   levels: RailLevel[];
   outcome: "pending" | "approved" | "rejected";
   risk?: Risk;
   receipt?: { hash: string; signedAt?: string };
   /** The one source for time left, window and due time. Omit `now` to follow the real clock. */
   clock?: { startedAt: string; dueAt: string; now?: number };
+  headingLevel?: 2 | 3 | 4;
 };
 
 type NodeState = "done" | "current" | "open" | "rejected" | "signed" | "unsigned";
@@ -33,16 +34,28 @@ type Node = {
   timer?: string;
 };
 
-const TICK_MS = 15_000;
+const SETTLE_MS = 50;
 
-/** A fixed `now` wins (tests, replays); otherwise re-read the clock so time left cannot go stale on screen. */
-function useNow(fixed?: number) {
+/** A fixed `now` wins (tests, replays). Otherwise tick just after each whole-minute boundary of dueAt, when the floored label changes. */
+function useNow(fixed: number | undefined, dueAt: string | undefined) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     if (fixed !== undefined) return;
-    const id = setInterval(() => setNow(Date.now()), TICK_MS);
-    return () => clearInterval(id);
-  }, [fixed]);
+    let id: ReturnType<typeof setTimeout>;
+    const tick = () => {
+      const t = Date.now();
+      setNow(t);
+      id = setTimeout(tick, next(t));
+    };
+    const next = (t: number) => (dueAt ? (msToNextMinute(dueAt, t) ?? 60_000) : 60_000) + SETTLE_MS;
+    const wake = () => document.visibilityState === "visible" && (clearTimeout(id), tick());
+    id = setTimeout(tick, next(Date.now()));
+    document.addEventListener("visibilitychange", wake);
+    return () => {
+      clearTimeout(id);
+      document.removeEventListener("visibilitychange", wake);
+    };
+  }, [fixed, dueAt]);
   return fixed ?? now;
 }
 
@@ -90,7 +103,10 @@ function Glyph({ state }: { state: NodeState }) {
 function buildNodes(p: RailProps, timerLabel: string | undefined, percent: number): Node[] {
   const { quorum: q, levels, outcome, receipt } = p;
   const nodes: Node[] = [];
+  const finished = outcome !== "pending";
   if (q.blind) {
+    const count =
+      q.voted === undefined ? null : q.reviewers === undefined ? `${q.voted} voted` : `${q.voted} of ${q.reviewers} voted`;
     nodes.push({
       key: "quorum",
       state: "open",
@@ -98,8 +114,8 @@ function buildNodes(p: RailProps, timerLabel: string | undefined, percent: numbe
       title: "Quorum",
       sub: (
         <>
-          {q.voted ?? 0} of {q.need} voted
-          <br />
+          {count}
+          {count && <br />}
           Vote hidden until round closes
         </>
       ),
@@ -109,8 +125,8 @@ function buildNodes(p: RailProps, timerLabel: string | undefined, percent: numbe
     const met = q.approved >= q.need;
     nodes.push({
       key: "quorum",
-      state: met ? "done" : "current",
-      word: met ? "Done. " : "Current. ",
+      state: met ? "done" : finished ? "open" : "current",
+      word: met ? "Done. " : finished ? "Stopped. " : "Current. ",
       title: `Quorum ${q.approved} of ${q.need}`,
       sub: q.revealedAt ? `Round revealed ${q.revealedAt}` : undefined,
       fill: met ? 100 : 0,
@@ -120,10 +136,14 @@ function buildNodes(p: RailProps, timerLabel: string | undefined, percent: numbe
   const shown = outcome === "rejected" ? levels.filter((l) => l.state !== "open") : levels;
   for (const l of shown) {
     const timed = l.state === "current" && outcome === "pending";
+    const stopped = finished && l.state === "current";
     nodes.push({
       key: `level-${l.level}`,
-      state: l.state,
-      word: { done: "Done. ", current: "Current. ", open: "Not started. ", rejected: "Rejected. " }[l.state],
+      state: stopped ? "open" : l.state,
+      // An open level without a note already reads "Not started" as visible text.
+      word: stopped
+        ? "Stopped. "
+        : { done: "Done. ", current: "Current. ", open: l.note ? "Not started. " : "", rejected: "Rejected. " }[l.state],
       title: `Level ${l.level} · ${l.role}`,
       sub: l.note ?? (l.state === "open" ? "Not started" : undefined),
       fill: l.state === "done" ? 100 : timed ? percent : 0,
@@ -132,7 +152,7 @@ function buildNodes(p: RailProps, timerLabel: string | undefined, percent: numbe
   }
 
   if (outcome === "rejected") {
-    nodes.push({ key: "end", state: "rejected", word: "Rejected. ", title: "Rejected", sub: "No receipt is issued", fill: 0 });
+    nodes.push({ key: "end", state: "rejected", word: "", title: "Rejected", sub: "No receipt is issued", fill: 0 });
   } else if (outcome === "approved" && receipt) {
     nodes.push({
       key: "end",
@@ -155,8 +175,8 @@ function buildNodes(p: RailProps, timerLabel: string | undefined, percent: numbe
 }
 
 export function DecisionRail(props: RailProps) {
-  const { levels, outcome, risk, clock } = props;
-  const now = useNow(clock?.now);
+  const { levels, outcome, risk, clock, headingLevel = 3 } = props;
+  const now = useNow(clock?.now, clock?.dueAt);
   const left = clock ? timeLeft(clock.dueAt, now) : null;
   const used = clock ? windowUsed(clock.startedAt, clock.dueAt, now) : null;
   const current = levels.find((l) => l.state === "current");
@@ -167,13 +187,15 @@ export function DecisionRail(props: RailProps) {
 
   return (
     <section aria-label="Decision progress" className="@container">
-      <h3 className="m-0 mb-2.5 flex flex-wrap items-baseline justify-between gap-2 text-body font-semibold">
-        Where it stands
-        <span className="flex items-center gap-2 text-small font-normal text-muted">
+      {createElement(
+        `h${headingLevel}`,
+        { className: "m-0 mb-2.5 flex flex-wrap items-baseline justify-between gap-2 text-body font-semibold" },
+        "Where it stands",
+        <span key="policy" className="flex items-center gap-2 text-small font-normal text-muted">
           {policy}
           {risk && <RiskPill risk={risk} />}
-        </span>
-      </h3>
+        </span>,
+      )}
 
       {outcome === "pending" && clock && (
         <div className="mb-4 flex flex-wrap items-baseline gap-x-3">
@@ -183,10 +205,10 @@ export function DecisionRail(props: RailProps) {
                 {left.label}
               </span>
               {left.note && <span className="text-small font-medium text-warning">{left.note}</span>}
-              <p className="m-0 max-w-[46ch] text-body text-muted">
+              <p className="m-0 max-w-(--measure) text-body text-muted">
                 {current ? `until level ${current.level} times out${next ? ` and the request goes to the ${next.role.toLowerCase()}` : ""}. ` : ""}
                 {used ? `${used.usedMin} of ${used.windowMin} min used, ` : ""}
-                due {clockTime(clock.dueAt)}.
+                due {clockTime(clock.dueAt, now)}.
               </p>
             </>
           ) : (
@@ -195,16 +217,16 @@ export function DecisionRail(props: RailProps) {
         </div>
       )}
 
-      <ol className="m-0 grid list-none grid-cols-(--n) p-0 @max-2xl:grid-cols-1" style={{ "--n": `repeat(${nodes.length}, minmax(0, 1fr))` } as CSSProperties}>
+      <ol role="list" className="m-0 grid list-none grid-cols-(--n) p-0 @max-2xl:grid-cols-1" style={{ "--n": `repeat(${nodes.length}, minmax(0, 1fr))` } as CSSProperties}>
         {nodes.map((n, i) => (
-          <li key={n.key} data-state={n.state} className="relative min-w-0 pt-5.5 pr-3 @max-2xl:pt-0 @max-2xl:pr-0 @max-2xl:pb-4.5 @max-2xl:pl-7 @max-2xl:last:pb-0">
+          <li key={n.key} data-state={n.state} className="relative min-w-0 pt-6 pr-3 @max-2xl:pt-0 @max-2xl:pr-0 @max-2xl:pb-5 @max-2xl:pl-7 @max-2xl:last:pb-0">
             <span className={`absolute top-0 left-0 size-4 border-2 @max-2xl:top-0.5 ${DOT[n.state]}`}>
               <Glyph state={n.state} />
             </span>
             {i < nodes.length - 1 && (
               <span
                 {...(n.timer ? { role: "img", "aria-label": n.timer } : { "aria-hidden": true })}
-                className="absolute top-1.75 right-1 left-5 h-0.5 overflow-hidden rounded-[1px] bg-active @max-2xl:top-5 @max-2xl:right-auto @max-2xl:bottom-0 @max-2xl:left-1.75 @max-2xl:h-auto @max-2xl:w-0.5"
+                className="absolute top-1.75 right-1 left-5 h-0.5 overflow-hidden rounded-pill bg-active @max-2xl:top-5 @max-2xl:right-auto @max-2xl:bottom-0 @max-2xl:left-1.75 @max-2xl:h-auto @max-2xl:w-0.5"
               >
                 <span
                   style={{ "--fill": `${n.fill}%` } as CSSProperties}
@@ -213,7 +235,7 @@ export function DecisionRail(props: RailProps) {
               </span>
             )}
             <div className="text-body leading-snug font-medium">
-              <span className="sr-only">{n.word}</span>
+              {n.word && <span className="sr-only">{n.word}</span>}
               {n.title}
             </div>
             {n.sub && <div className={`mt-0.5 text-small wrap-anywhere ${n.state === "current" ? "text-text" : "text-muted"}`}>{n.sub}</div>}
