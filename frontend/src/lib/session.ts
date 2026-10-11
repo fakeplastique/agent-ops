@@ -52,13 +52,14 @@ let channel: BroadcastChannel | null = null;
 const tabChannel = () =>
   typeof BroadcastChannel === "undefined" ? null : (channel ??= new BroadcastChannel(CHANNEL));
 
-/** Ends the session; the local copy goes even if the server call fails. A full load leaves no in-memory state. */
-export async function signOut() {
+/** Ends the session (the local copy goes even if the call fails) with a full load; `back` returns the next sign-in there. */
+export async function signOut(back?: string) {
   try {
     await api("/auth/logout", { method: "POST" });
   } catch {}
   resetClient();
-  goTo("/login");
+  const next = safeNext(back);
+  goTo(next ? `/login?next=${encodeURIComponent(next)}` : "/login");
 }
 
 /** Selects another organization; only once the server agreed is the client cleared and reloaded. */

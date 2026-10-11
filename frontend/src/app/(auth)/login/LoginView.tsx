@@ -12,7 +12,8 @@ const ERRORS: Record<string, { title: string; note: string }> = {
 const FAILED = { title: "Sign-in did not complete", note: "Use a Google account with a verified email address, then try again." };
 
 export function LoginView({ error, next }: { error: string | null; next: string | null }) {
-  const problem = error ? (ERRORS[error] ?? FAILED) : null;
+  // Own keys only: `constructor` or `__proto__` would otherwise come off the prototype.
+  const problem = error ? (Object.hasOwn(ERRORS, error) ? ERRORS[error] : FAILED) : null;
 
   // The next identity starts clean: nothing the previous user left in this browser survives the round trip.
   const begin = () => {

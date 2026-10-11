@@ -93,6 +93,17 @@ describe("Onboarding", () => {
     await userEvent.type(await screen.findByLabelText("Name"), "Northwind");
     await userEvent.click(screen.getByRole("button", { name: "Create organization" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("The organization was not created");
+    expect(screen.getByRole("alert")).toHaveTextContent(/Check your connection/);
+    expect(screen.getByLabelText("Name")).toHaveValue("Northwind");
+  });
+
+  it("a server error keeps the form and does not blame the connection", async () => {
+    serve(() => json(500, { error: { code: "internal", message: "boom", details: {} } }));
+    render(<Onboarding />);
+    await userEvent.type(await screen.findByLabelText("Name"), "Northwind");
+    await userEvent.click(screen.getByRole("button", { name: "Create organization" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("The organization was not created");
+    expect(screen.getByRole("alert")).not.toHaveTextContent(/connection/);
     expect(screen.getByLabelText("Name")).toHaveValue("Northwind");
   });
 });

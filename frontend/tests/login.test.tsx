@@ -51,6 +51,12 @@ describe("Login", () => {
     expect(document.body.textContent).not.toContain("555");
   });
 
+  // A plain-object lookup would find these on the prototype and render an empty notice.
+  it.each(["constructor", "__proto__", "toString", "hasOwnProperty"])("?error=%s shows the generic text", (code) => {
+    render(<LoginView error={code} next={null} />);
+    expect(screen.getByRole("alert")).toHaveTextContent("Sign-in did not complete");
+  });
+
   it("Continue drops the previous user's local state and keeps a safe next for after the round trip", async () => {
     localStorage.setItem("draft", "user A");
     render(<LoginView error={null} next="/decisions?status=pending_votes" />);

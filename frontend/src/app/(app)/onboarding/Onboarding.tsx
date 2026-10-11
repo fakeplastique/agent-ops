@@ -2,7 +2,7 @@
 
 import { useId, useRef, useState, type FormEvent } from "react";
 
-import { AuthFrame, Notice, primaryButton, secondaryButton } from "@/app/(auth)/AuthFrame";
+import { AuthFrame, Notice, primaryButton, retryNote, secondaryButton } from "@/app/(auth)/AuthFrame";
 import { ReadView } from "@/components/states/States";
 import { api, ApiError } from "@/lib/api/client";
 import { enterOrganization, signOut, useSession } from "@/lib/session";
@@ -85,7 +85,7 @@ function CreateOrganization() {
       if (err instanceof ApiError && err.code === "slug_taken") {
         setErrors({ slug: "That slug is taken. Try another." });
         slugRef.current?.focus();
-      } else setErrors({ form: err instanceof ApiError && err.status === 422 ? err.message : "Check your connection, then try again." });
+      } else setErrors({ form: err instanceof ApiError && err.status === 422 ? err.message : retryNote(err) });
       return;
     }
     enterOrganization(); // the API switched the session to the new organization

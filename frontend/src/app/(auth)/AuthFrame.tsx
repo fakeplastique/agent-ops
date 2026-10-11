@@ -3,6 +3,7 @@
 import { useEffect, useRef, type ReactNode } from "react";
 
 import { Brand } from "@/components/shell/Shell";
+import { ApiError } from "@/lib/api/client";
 import { useIdentitySync } from "@/lib/session";
 
 /** Screens before the app (sign in, onboarding, invitations): the tinted frame with one narrow sheet, no nav. */
@@ -35,6 +36,13 @@ export function Notice({ title, children }: { title: string; children?: ReactNod
       {children && <div className="m-0 text-muted">{children}</div>}
     </div>
   );
+}
+
+/** Recovery line for a write that failed: only an unanswered call (status 0: network, timeout) is about the connection. */
+export function retryNote(e: unknown): string {
+  return e instanceof ApiError && e.status === 0
+    ? "Nothing changed. Check your connection, then try again."
+    : "Nothing changed. The server could not finish this. Try again in a moment.";
 }
 
 export const primaryButton =

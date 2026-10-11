@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -62,10 +62,26 @@ describe("Invitation", () => {
     expect(screen.getByRole("button", { name: "Sign out" })).toBeInTheDocument();
   });
 
-  it("a server failure keeps Accept so the user can retry", async () => {
+  it("a server failure keeps Accept and does not blame the connection", async () => {
     await accept(reply(503, envelope("unavailable")));
     expect(await screen.findByRole("alert")).toHaveTextContent("The invitation was not accepted");
+    expect(screen.getByRole("alert")).not.toHaveTextContent(/connection/);
     expect(screen.getByRole("button", { name: "Accept invitation" })).toBeInTheDocument();
+  });
+
+  it("no answer from the server points at the connection", async () => {
+    await accept(vi.fn(() => Promise.reject(new TypeError("offline"))));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/Check your connection/);
+    expect(screen.getByRole("button", { name: "Accept invitation" })).toBeInTheDocument();
+  });
+
+  // After switching accounts the user should land back on this invitation.
+  it("Sign out from the mismatch notice comes back to the invitation", async () => {
+    window.history.replaceState(null, "", `/invite/${TOKEN}`);
+    await accept(reply(403, envelope("invitation_email_mismatch", { invited_email: "a@x.com" })));
+    vi.stubGlobal("fetch", reply(204));
+    await userEvent.click(await screen.findByRole("button", { name: "Sign out" }));
+    await waitFor(() => expect(goTo).toHaveBeenCalledWith(`/login?next=${encodeURIComponent(`/invite/${TOKEN}`)}`));
   });
 
   it("joining clears the client and does a full load of the inbox", async () => {

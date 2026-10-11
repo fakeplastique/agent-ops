@@ -6,20 +6,21 @@ import { useState } from "react";
 import { api, ApiError } from "@/lib/api/client";
 import { enterOrganization, signOut } from "@/lib/session";
 
-import { AuthFrame, Notice, primaryButton, secondaryButton } from "../../AuthFrame";
+import { AuthFrame, Notice, primaryButton, retryNote, secondaryButton } from "../../AuthFrame";
 
 type State =
-  | { kind: "idle" | "busy" | "failed" | "unusable" | "member" }
+  | { kind: "idle" | "busy" | "unusable" | "member" }
+  | { kind: "failed"; note: string }
   | { kind: "mismatch"; email: string };
 
 // The API gives one answer for unknown, expired, used and revoked; a malformed token (422) and any 404 read the same.
 function outcome(e: unknown): State {
-  if (!(e instanceof ApiError)) return { kind: "failed" };
+  if (!(e instanceof ApiError)) return { kind: "failed", note: retryNote(e) };
   if (e.code === "invitation_email_mismatch" && typeof e.details.invited_email === "string")
     return { kind: "mismatch", email: e.details.invited_email };
   if (e.code === "already_member") return { kind: "member" };
   if (e.status === 404 || e.status === 422) return { kind: "unusable" };
-  return { kind: "failed" };
+  return { kind: "failed", note: retryNote(e) };
 }
 
 export function InviteView({ token }: { token: string }) {
@@ -48,7 +49,7 @@ export function InviteView({ token }: { token: string }) {
           <Notice title={`This invitation is for ${state.email}`}>
             You are signed in with a different Google account. Sign out, then sign in with {state.email}.
           </Notice>
-          <button type="button" onClick={() => void signOut()} className={`self-start ${secondaryButton}`}>
+          <button type="button" onClick={() => void signOut(window.location.pathname)} className={`self-start ${secondaryButton}`}>
             Sign out
           </button>
         </>
@@ -62,7 +63,7 @@ export function InviteView({ token }: { token: string }) {
         </>
       )}
       {state.kind === "failed" && (
-        <Notice title="The invitation was not accepted">Nothing changed. Check your connection, then try again.</Notice>
+        <Notice title="The invitation was not accepted">{state.note}</Notice>
       )}
       {(state.kind === "idle" || state.kind === "busy" || state.kind === "failed") && (
         <button type="button" aria-disabled={busy} onClick={() => void accept()} className={`self-start ${primaryButton}`}>
