@@ -22,6 +22,8 @@ from app.api.v1 import (
     votes,
     webhooks,
 )
+from app.telegram import link as telegram_link
+from app.telegram import webhook as telegram_webhook
 
 api_v1_router = APIRouter(prefix="/api/v1")
 api_v1_router.include_router(auth.router)
@@ -44,5 +46,7 @@ api_v1_router.include_router(platform.router)
 api_v1_router.include_router(webhooks.router)
 api_v1_router.include_router(stats.router)
 api_v1_router.include_router(events.router)
+api_v1_router.include_router(telegram_link.router)
+api_v1_router.include_router(telegram_webhook.router)
 
 __all__ = ["api_v1_router"]

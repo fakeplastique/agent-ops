@@ -9,6 +9,8 @@ pytestmark = pytest.mark.anyio
 UNLIMITED = {
     "/api/v1/auth/logout",
     "/api/v1/auth/organization",
+    # Telegram only: secret-header checked before any I/O; a per-IP limit would throttle Telegram's few IPs
+    "/api/v1/telegram/webhook",
 }  # session plumbing, not tenant writes
 
 

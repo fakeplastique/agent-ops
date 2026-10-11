@@ -15,10 +15,10 @@ def test_the_relay_runs_every_second_and_the_timeout_sweep_every_minute():
     assert str(WorkerSettings.redis_settings.host) in settings.redis_url
 
 
-def test_the_webhooks_concern_has_its_consumer():
-    # the relay enqueues `webhooks` jobs: without a function of that name they would fail unrun
-    assert "webhooks" in CONCERNS
-    assert "webhooks" in {f.name for f in WorkerSettings.functions}
+def test_every_relay_concern_has_its_consumer():
+    # the relay enqueues one job per concern: without a function of that name it would fail unrun
+    assert {"webhooks", "notifications", "analytics"} <= set(CONCERNS)
+    assert {f.name for f in WorkerSettings.functions} >= {"webhooks", "notifications", "analytics"}
 
 
 def test_job_ids_are_stable_per_event_and_concern():

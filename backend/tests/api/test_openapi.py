@@ -60,6 +60,7 @@ CONFLICT = {
 }
 PLAN = {("post", "/api/v1/decision-requests"), ("post", "/api/v1/escalation-policies")}
 PLAN |= {("get", "/api/v1/stats/summary"), ("get", "/api/v1/stats/timeseries")}  # analytics gate
+PLAN |= {("post", "/api/v1/me/telegram/link-code")}  # flag `telegram`
 PUBLIC = {"/healthz", "/readyz", "/api/v1/auth/login", "/api/v1/auth/callback"}
 PUBLIC |= {"/api/v1/auth/logout", "/api/v1/receipts/verify"}
 UNLIMITED = {"/api/v1/auth/logout", "/api/v1/auth/organization"}  # session-only, no write limit
