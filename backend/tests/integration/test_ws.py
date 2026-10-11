@@ -1,14 +1,17 @@
 import asyncio
 import uuid
+from functools import partial
 
 import pytest
 from sqlalchemy import text
 
+from app.adapters import pubsub_redis
 from app.api import deps
 from app.db.session import tenant_session
 from app.main import app
-from app.realtime import ws
+from app.realtime import longpoll, ws
 from app.services import outbox
+from app.worker.relay import relay_once
 from tests.api.harness import agent_auth, user_auth
 
 from .helpers import fetch, make_member, make_org, make_world, staff
@@ -79,3 +82,159 @@ async def test_ticket_is_for_users_whose_membership_still_holds(web, app_engine,
         await c.execute(text("delete from memberships where user_id=:u"), {"u": user})
     # catches: a ticket outliving the membership it was minted under
     assert (await WS(ticket=t).open())["type"] == "websocket.close"
+
+
+async def _pat_member(app_engine, owner_engine) -> tuple[uuid.UUID, uuid.UUID, dict[str, str]]:
+    org = await make_org(owner_engine)
+    await staff(owner_engine, org, "org_admin")  # someone stays when the member leaves
+    user = await staff(owner_engine, org, "member")
+    return org, user, await user_auth(app_engine, org, user)
+
+
+async def _seqs(sock: WS, n: int) -> list[int]:
+    got: list[int] = []
+    while len(got) < n:
+        got += [e["seq"] for e in (await sock.frame(3))["events"]]
+    return got
+
+
+async def _quiet(sock: WS, wait: float = 0.5) -> None:
+    await asyncio.sleep(wait)
+    assert sock.from_app.empty(), sock.from_app.get_nowait()
+
+
+async def _subscribers(redis) -> list[dict]:
+    db = redis.connection_pool.connection_kwargs.get("db", 0)
+    return [c for c in await redis.client_list(_type="pubsub") if int(c["db"]) == db]
+
+
+class _NoQueue:
+    async def enqueue_job(self, *args, **kw) -> None:
+        return None
+
+
+async def test_replay_then_live_without_gap_or_duplicate_at_the_seam(
+    web, app_engine, owner_engine, worker_engine, monkeypatch
+):
+    monkeypatch.setattr(ws, "BATCH", 2)  # the replay spans pages
+    monkeypatch.setattr(ws, "FALLBACK", 30)  # only a wake-up delivers within the test's patience
+    org, _user, h = await _pat_member(app_engine, owner_engine)
+    for i in range(5):
+        await plant(app_engine, org, str(i))
+    redis, real, seamed = web_redis(web), ws.read_after, asyncio.Event()
+
+    async def seam(engine, o, after, limit):
+        rows = await real(engine, o, after, limit)
+        if not rows and not seamed.is_set():  # the replay just ran dry: commit and wake right here
+            seamed.set()
+            await plant(app_engine, org, "seam")
+            await pubsub_redis.publish(redis, [org])
+        return rows
+
+    monkeypatch.setattr(ws, "read_after", seam)
+    sock = WS(ticket=await ticket(web, h), after="1")
+    assert (await sock.open())["type"] == "websocket.accept"
+    # catches: subscribing after the replay (the seam's event waits for the next poll) or re-sending one
+    assert await _seqs(sock, 5) == [2, 3, 4, 5, 6]
+    await _quiet(sock)  # the server drained its wake-ups and sleeps on FALLBACK
+    # Live: the relay publishes the wake-up once the event committed.
+    seq = await plant(app_engine, org, "live")
+    await relay_once(worker_engine, _NoQueue(), notify=partial(pubsub_redis.publish, redis))
+    assert await _seqs(sock, 1) == [seq]
+    await _quiet(sock)
+    await sock.leave()
+
+
+async def test_redis_pubsub_loss_falls_back_to_db_poll_without_losing_events(
+    web, app_engine, owner_engine, monkeypatch
+):
+    monkeypatch.setattr(ws, "FALLBACK", 0.3)
+    org, _user, h = await _pat_member(app_engine, owner_engine)
+    redis = web_redis(web)
+    sock = WS(ticket=await ticket(web, h))
+    assert (await sock.open())["type"] == "websocket.accept"
+    await asyncio.sleep(0.2)
+    subs = await _subscribers(redis)
+    assert subs, "the socket holds no subscription"
+    for c in subs:  # this test's Redis database only: other lanes share the server
+        await redis.client_kill_filter(_id=c["id"])
+    seqs = [await plant(app_engine, org, str(i)) for i in range(3)]
+    await pubsub_redis.publish(redis, [org])  # into the void
+    # catches: pub/sub treated as the source of truth (events committed while it was down never arrive)
+    assert await _seqs(sock, 3) == seqs
+    more = await plant(app_engine, org, "after")
+    assert await _seqs(sock, 1) == [more]
+    await sock.leave()
+
+
+async def test_slow_client_is_dropped_not_buffered_unbounded(
+    web, app_engine, owner_engine, monkeypatch
+):
+    monkeypatch.setattr(ws, "SEND_TIMEOUT", 0.3)
+    org, user, h = await _pat_member(app_engine, owner_engine)
+    for i in range(3):
+        await plant(app_engine, org, str(i))
+    reads, real = [], ws.read_after
+
+    async def counted(*args):
+        reads.append(args[2])
+        return await real(*args)
+
+    monkeypatch.setattr(ws, "read_after", counted)
+    sock = WS(stall=True, ticket=await ticket(web, h))
+    assert (await sock.open())["type"] == "websocket.accept"
+    assert sock.task is not None
+    # catches: a stalled socket holding its slot, subscription and a growing backlog forever
+    await asyncio.wait_for(sock.task, 3)
+    for i in range(3):
+        await plant(app_engine, org, f"later-{i}")
+    await asyncio.sleep(0.3)
+    assert reads == [0]  # one batch read, never further ahead of what the client took
+    redis = web_redis(web)
+    assert await redis.zcard(longpoll.waiter_key(org, user)) == 0
+    assert await _subscribers(redis) == []
+
+
+async def test_access_lapse_mid_stream_closes_without_delivering(
+    web, app_engine, owner_engine, monkeypatch
+):
+    monkeypatch.setattr(ws, "FALLBACK", 0.3)
+    org, user, h = await _pat_member(app_engine, owner_engine)
+    sock = WS(ticket=await ticket(web, h))
+    assert (await sock.open())["type"] == "websocket.accept"
+    first = await plant(app_engine, org, "before")
+    assert await _seqs(sock, 1) == [first]
+    async with owner_engine.begin() as c:
+        await c.execute(text("delete from memberships where user_id=:u"), {"u": user})
+    await plant(app_engine, org, "x-AFTER")
+    # catches: a socket outliving the membership (I19: authorized users only)
+    assert (await sock.closed(3))["code"] == 1008
+    assert sock.task is not None
+    await asyncio.wait_for(sock.task, 3)
+
+
+async def test_disconnect_lifetime_and_cap_release_resources(
+    web, app_engine, owner_engine, monkeypatch
+):
+    monkeypatch.setattr(longpoll, "MAX_WAITERS", 1)
+    org, user, h = await _pat_member(app_engine, owner_engine)
+    redis, key = web_redis(web), longpoll.waiter_key(org, user)
+    sock = WS(ticket=await ticket(web, h))
+    assert (await sock.open())["type"] == "websocket.accept"
+    # catches: unbounded sockets per user (the long-poll cap, shared)
+    assert (await WS(ticket=await ticket(web, h)).open())["type"] == "websocket.close"
+    await sock.leave(2)  # catches: a gone client holding its slot until the lifetime ends
+    assert await redis.zcard(key) == 0 and await _subscribers(redis) == []
+    monkeypatch.setattr(ws, "LIFETIME", 0.6)
+    sock = WS(ticket=await ticket(web, h))
+    assert (await sock.open())["type"] == "websocket.accept"
+    # catches: a socket living forever on a ticket minted once (the client reconnects with a fresh one)
+    assert (await sock.closed(3))["code"] == 1000
+    assert sock.task is not None
+    await asyncio.wait_for(sock.task, 3)
+    assert await redis.zcard(key) == 0 and await _subscribers(redis) == []
+
+
+def test_a_socket_slot_outlives_its_socket():
+    # catches: the shared cap's slot expiring while its socket still streams
+    assert ws.SLOT_TTL > ws.LIFETIME + ws.SEND_TIMEOUT

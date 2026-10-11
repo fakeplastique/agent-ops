@@ -1,3 +1,4 @@
+from functools import partial
 from typing import Any
 
 from arq import cron, func
@@ -5,6 +6,7 @@ from arq.connections import RedisSettings
 
 from app.adapters.analytics_log import LogAnalytics
 from app.adapters.clock import SystemClock
+from app.adapters.pubsub_redis import publish
 from app.config import settings
 from app.db.engine import make_engine
 from app.worker.analytics import analytics_job
@@ -27,7 +29,10 @@ async def shutdown(ctx: dict[str, Any]) -> None:
 
 
 async def relay_job(ctx: dict[str, Any]) -> dict[str, int]:
-    return await relay_once(ctx["scan_engine"], ctx["redis"], ctx["clock"])
+    # arq's pool is a Redis client: it also wakes the realtime sockets of each relayed organization
+    return await relay_once(
+        ctx["scan_engine"], ctx["redis"], ctx["clock"], notify=partial(publish, ctx["redis"])
+    )
 
 
 class WorkerSettings:

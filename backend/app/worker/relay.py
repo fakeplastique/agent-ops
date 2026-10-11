@@ -1,4 +1,6 @@
 import logging
+import uuid
+from collections.abc import Awaitable, Callable
 from datetime import datetime
 from typing import Any, Protocol
 
@@ -33,6 +35,7 @@ async def relay_once(
     clock: Clock | None = None,
     *,
     batch: int = 100,
+    notify: Callable[[set[uuid.UUID]], Awaitable[None]] | None = None,
 ) -> dict[str, int]:
     """Publish every unpublished event: enqueue one job per concern, then stamp the batch published.
 
@@ -59,6 +62,8 @@ async def relay_once(
                 if len(stamped) != len(rows):  # else the same rows would be picked again, forever
                     raise RuntimeError(f"stamped {len(stamped)} of {len(rows)} outbox events")
             published += len(rows)
+            if notify is not None:  # after commit: a socket woken now reads the batch
+                await notify({org for _, org in rows})
         except (
             Exception
         ):  # Redis or the database is away: stop, the batch rolled back, the next run retries

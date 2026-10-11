@@ -73,6 +73,17 @@ async def waiter_slot(
         await asyncio.shield(task)
 
 
+def project_rows(rows: list[dict[str, Any]], role: Role) -> list[dict[str, Any]]:
+    """The events of a batch this role may read, each cut to its allow-list (long-poll and WebSocket)."""
+    events = []
+    for r in rows:
+        data = project(r["type"], r["payload"], role)
+        if data is not None:
+            keep = ("id", "seq", "type", "created_at")
+            events.append({k: r[k] for k in keep} | {"data": data})
+    return events
+
+
 async def poll(
     engine: AsyncEngine,
     org: uuid.UUID,
@@ -91,14 +102,7 @@ async def poll(
     while True:
         rows = await read_after(engine, org, after, limit)
         if rows:
-            role = await recheck()
-            events = []
-            for r in rows:
-                data = project(r["type"], r["payload"], role)
-                if data is not None:
-                    keep = ("id", "seq", "type", "created_at")
-                    events.append({k: r[k] for k in keep} | {"data": data})
-            return events, rows[-1]["seq"]
+            return project_rows(rows, await recheck()), rows[-1]["seq"]
         remaining = deadline - time.monotonic()
         if remaining <= 0 or await gone():
             return [], after
