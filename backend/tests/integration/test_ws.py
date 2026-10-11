@@ -47,8 +47,9 @@ async def test_ticket_single_use_expires_30s_bound_to_user_and_org(
     keys = [k async for k in web_redis(web).scan_iter("rt:ticket:*")]
     assert len(keys) == 1 and t.encode() not in keys[0]  # stored by hash, never the ticket itself
     assert 0 < await web_redis(web).ttl(keys[0]) <= 30
-    # A switch after minting does not move the ticket; a query parameter cannot name another org.
-    await web.post("/api/v1/auth/organization", json={"organization_id": str(two)})
+    # catches: the session cookie itself parked in Redis (the ticket names it by hash)
+    assert web.client.cookies[deps.COOKIE].encode() not in await web_redis(web).get(keys[0])
+    # A query parameter cannot name another org.
     sock = WS(ticket=t, organization_id=str(two), org=str(two))
     assert (await sock.open())["type"] == "websocket.accept"
     frame = await sock.frame()
@@ -206,11 +207,72 @@ async def test_access_lapse_mid_stream_closes_without_delivering(
     assert await _seqs(sock, 1) == [first]
     async with owner_engine.begin() as c:
         await c.execute(text("delete from memberships where user_id=:u"), {"u": user})
-    await plant(app_engine, org, "x-AFTER")
-    # catches: a socket outliving the membership (I19: authorized users only)
+    # catches: a socket outliving the membership (I19), even with nothing to send (no slot held idle)
     assert (await sock.closed(3))["code"] == 1008
     assert sock.task is not None
     await asyncio.wait_for(sock.task, 3)
+
+
+async def _closes_without_x_after(sock: WS, app_engine, org) -> None:
+    await plant(app_engine, org, "x-AFTER")
+    msg = await asyncio.wait_for(sock.from_app.get(), 3)
+    assert msg["type"] == "websocket.close" and msg["code"] == 1008, msg
+    assert sock.task is not None
+    await asyncio.wait_for(sock.task, 3)
+
+
+async def test_revoked_pat_mid_stream_closes_without_delivering(
+    web, app_engine, owner_engine, monkeypatch
+):
+    monkeypatch.setattr(ws, "FALLBACK", 0.3)
+    org, user, h = await _pat_member(app_engine, owner_engine)
+    sock = WS(ticket=await ticket(web, h))
+    assert (await sock.open())["type"] == "websocket.accept"
+    async with owner_engine.begin() as c:
+        await c.execute(
+            text("update personal_access_tokens set revoked_at = now() where user_id=:u"),
+            {"u": user},
+        )
+    # catches: a revoked token streaming on until the socket's lifetime ends (I13)
+    await _closes_without_x_after(sock, app_engine, org)
+
+
+async def test_logged_out_session_mid_stream_closes_without_delivering(
+    web, app_engine, owner_engine, monkeypatch
+):
+    monkeypatch.setattr(ws, "FALLBACK", 0.3)
+    org = await make_org(owner_engine)
+    await _cookie_user_in(web, owner_engine, org)
+    sock = WS(ticket=await ticket(web))
+    assert (await sock.open())["type"] == "websocket.accept"
+    assert (await web.post("/api/v1/auth/logout")).status_code == 204
+    # catches: a socket outliving the session that minted its ticket
+    await _closes_without_x_after(sock, app_engine, org)
+
+
+async def test_session_switched_to_another_org_mid_stream_closes(
+    web, app_engine, owner_engine, monkeypatch
+):
+    monkeypatch.setattr(ws, "FALLBACK", 0.3)
+    one, two = await make_org(owner_engine), await make_org(owner_engine)
+    await _cookie_user_in(web, owner_engine, one, two)
+    sock = WS(ticket=await ticket(web))
+    assert (await sock.open())["type"] == "websocket.accept"
+    await web.post("/api/v1/auth/organization", json={"organization_id": str(two)})
+    # catches: a socket streaming the organization the user just left the view of (as the long-poll)
+    await _closes_without_x_after(sock, app_engine, one)
+
+
+async def test_ticket_minted_then_credential_revoked_is_refused(web, app_engine, owner_engine):
+    _org, user, h = await _pat_member(app_engine, owner_engine)
+    t = await ticket(web, h)
+    async with owner_engine.begin() as c:
+        await c.execute(
+            text("update personal_access_tokens set revoked_at = now() where user_id=:u"),
+            {"u": user},
+        )
+    # catches: a ticket outliving the credential that minted it
+    assert (await WS(ticket=t).open())["type"] == "websocket.close"
 
 
 async def test_disconnect_lifetime_and_cap_release_resources(
@@ -222,9 +284,14 @@ async def test_disconnect_lifetime_and_cap_release_resources(
     sock = WS(ticket=await ticket(web, h))
     assert (await sock.open())["type"] == "websocket.accept"
     # catches: unbounded sockets per user (the long-poll cap, shared)
-    assert (await WS(ticket=await ticket(web, h)).open())["type"] == "websocket.close"
+    spare = await ticket(web, h)
+    assert (await WS(ticket=spare).open())["type"] == "websocket.close"
     await sock.leave(2)  # catches: a gone client holding its slot until the lifetime ends
     assert await redis.zcard(key) == 0 and await _subscribers(redis) == []
+    # catches: a cap refusal burning the ticket (the client retries with the same one)
+    sock = WS(ticket=spare)
+    assert (await sock.open())["type"] == "websocket.accept"
+    await sock.leave(2)
     monkeypatch.setattr(ws, "LIFETIME", 0.6)
     sock = WS(ticket=await ticket(web, h))
     assert (await sock.open())["type"] == "websocket.accept"

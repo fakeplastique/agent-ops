@@ -1,15 +1,16 @@
 import uuid
 from datetime import datetime
+from functools import partial
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Header, Query, Request
 from pydantic import BaseModel
 
-from app.api.deps import ActorDep, ClockDep, EngineDep, RedisDep, session_user
-from app.authz.matrix import Role
+from app.api.deps import COOKIE, ActorDep, ClockDep, EngineDep, RedisDep
 from app.authz.principals import UserPrincipal
-from app.authz.resolver import resolve_bearer
-from app.domain.errors import Forbidden, NotFoundError, Unauthenticated
+from app.domain.errors import Forbidden
+from app.realtime import access
+from app.realtime.access import credential_of
 from app.realtime.feed import parse_cursor
 from app.realtime.longpoll import MAX_WAIT, poll, waiter_slot
 
@@ -51,21 +52,9 @@ async def long_poll(
         raise Forbidden("the event feed is for users")
     org = actor.organization_id
 
-    async def recheck() -> Role:
-        # The resolvers behind ActorDep, minus the login-failure counter: a lapse is no failed login.
-        # A lapse (or a switch to another org) is this org's 404.
-        try:
-            if authorization is not None:
-                now = (await resolve_bearer(engine, authorization)).principal
-            else:
-                now = await session_user(request, engine, clock)
-        except (Unauthenticated, Forbidden):
-            raise NotFoundError from None
-        if not isinstance(now, UserPrincipal) or now.user_id != actor.user_id:
-            raise NotFoundError
-        if now.organization_id != org:
-            raise NotFoundError
-        return now.role
+    # The credential ActorDep resolved, re-verified before a batch leaves (shared with /ws).
+    cred = credential_of(authorization, request.cookies.get(COOKIE))
+    recheck = partial(access.recheck, engine, cred, actor.user_id, org, clock)
 
     cursor = parse_cursor(after)
     async with waiter_slot(redis, org, actor.user_id, clock.now().timestamp()):

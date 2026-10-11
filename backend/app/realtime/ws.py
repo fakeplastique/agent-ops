@@ -1,6 +1,10 @@
 import hashlib
+import json
 import secrets
 import uuid
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
+from functools import partial
 from typing import Any
 
 import anyio
@@ -14,17 +18,18 @@ from app.api.deps import ClockDep, EngineDep, RedisDep
 from app.api.v1.events import EventOut, FeedOut
 from app.authz.matrix import Role
 from app.config import settings
-from app.domain.errors import InvalidInput, RateLimited, RateLimiterUnavailable
+from app.domain.errors import InvalidInput, NotFoundError, RateLimited, RateLimiterUnavailable
+from app.realtime import access
+from app.realtime.access import Credential
 from app.realtime.feed import parse_cursor, read_after
 from app.realtime.longpoll import project_rows, waiter_slot
-from app.services.web_sessions import role_in
 
 router = APIRouter(tags=["realtime"])
 TICKET_TTL = 30  # seconds (spec 5.3)
 BATCH = 100  # events per frame: the server never reads further ahead of the client than this
 FALLBACK = 5.0  # seconds between database reads when no wake-up arrives (pub/sub is a hint only)
 SEND_TIMEOUT = 5.0  # a client that cannot take one frame in this time is dropped
-# Then the client reconnects with a fresh ticket: access is re-proven at least this often.
+# Then the client reconnects with a fresh ticket (the credential itself is re-verified every tick).
 LIFETIME = 300.0
 SLOT_TTL = LIFETIME + SEND_TIMEOUT + 15  # the shared waiter cap's slot outlives its socket
 
@@ -34,22 +39,38 @@ def _ticket_key(ticket: str) -> str:
     return "rt:ticket:" + hashlib.sha256(ticket.encode()).hexdigest()
 
 
-async def issue_ticket(redis: Redis, user: uuid.UUID, org: uuid.UUID) -> str:
+@dataclass(frozen=True)
+class Ticket:
+    user: uuid.UUID
+    org: uuid.UUID
+    cred: Credential
+
+
+async def issue_ticket(redis: Redis, user: uuid.UUID, org: uuid.UUID, cred: Credential) -> str:
     ticket = secrets.token_urlsafe(32)
-    await redis.set(_ticket_key(ticket), f"{user}:{org}", ex=TICKET_TTL)
+    value = json.dumps({"u": str(user), "o": str(org), "k": cred.kind, "d": cred.digest})
+    await redis.set(_ticket_key(ticket), value, ex=TICKET_TTL)
     return ticket
 
 
-async def redeem(redis: Redis, ticket: str) -> tuple[uuid.UUID, uuid.UUID] | None:
-    """(user, organization) the ticket was minted for, once: GETDEL is atomic across instances."""
+async def peek(redis: Redis, ticket: str) -> Ticket | None:
+    """What a live ticket was minted for, without spending it (a refusal before the upgrade keeps it)."""
     try:
-        raw = await redis.getdel(_ticket_key(ticket))
+        raw = await redis.get(_ticket_key(ticket))
     except (RedisError, OSError):
         return None
     if raw is None:
         return None
-    user, org = (raw.decode() if isinstance(raw, bytes) else raw).split(":")
-    return uuid.UUID(user), uuid.UUID(org)
+    v = json.loads(raw)
+    return Ticket(uuid.UUID(v["u"]), uuid.UUID(v["o"]), Credential(v["k"], v["d"]))
+
+
+async def spend(redis: Redis, ticket: str) -> bool:
+    """Single use: GETDEL is atomic across instances, so only one socket gets True."""
+    try:
+        return await redis.getdel(_ticket_key(ticket)) is not None
+    except (RedisError, OSError):
+        return False
 
 
 def frame(org: uuid.UUID, rows: list[dict[str, Any]], role: Role) -> str:
@@ -75,20 +96,25 @@ async def stream(
         cursor = parse_cursor(after)
     except InvalidInput:
         return await ws.close(status.WS_1008_POLICY_VIOLATION)
-    owner = await redeem(redis, ticket) if ticket else None
-    if owner is None:
+    t = await peek(redis, ticket) if ticket else None
+    if t is None:
         return await ws.close(status.WS_1008_POLICY_VIOLATION)
-    user, org = owner
-    if await role_in(engine, user, org) is None:  # left since the ticket was minted
+    check = partial(access.recheck, engine, t.cred, t.user, t.org, clock)
+    try:
+        await check()  # the credential, the session's organization and the membership, read now
+    except NotFoundError:
         return await ws.close(status.WS_1008_POLICY_VIOLATION)
     code: int | None = None
     try:
-        async with waiter_slot(redis, org, user, clock.now().timestamp(), SLOT_TTL):
+        # The cap before the ticket is spent: a refused client retries with the same ticket.
+        async with waiter_slot(redis, t.org, t.user, clock.now().timestamp(), SLOT_TTL):
+            if not await spend(redis, ticket):  # another socket took it first
+                return await ws.close(status.WS_1008_POLICY_VIOLATION)
             await ws.accept()
             async with anyio.create_task_group() as tg:
                 tg.start_soon(_until_gone, ws, tg.cancel_scope)
                 with anyio.move_on_after(LIFETIME) as life:
-                    code = await _pump(ws, engine, redis, org, user, cursor)
+                    code = await _pump(ws, engine, redis, t.org, cursor, check)
                 if life.cancelled_caught:
                     code = status.WS_1000_NORMAL_CLOSURE  # reconnect with a fresh ticket
                 tg.cancel_scope.cancel()
@@ -107,7 +133,12 @@ async def _until_gone(ws: WebSocket, scope: anyio.CancelScope) -> None:
 
 
 async def _pump(
-    ws: WebSocket, engine: AsyncEngine, redis: Redis, org: uuid.UUID, user: uuid.UUID, cursor: int
+    ws: WebSocket,
+    engine: AsyncEngine,
+    redis: Redis,
+    org: uuid.UUID,
+    cursor: int,
+    check: Callable[[], Awaitable[Role]],
 ) -> int | None:
     """Pages from the cursor, then one read per wake-up (or FALLBACK). Returns the close code; None drops
     a client that stopped reading (closing it would stall too).
@@ -117,14 +148,15 @@ async def _pump(
     async with subscription(redis, org) as wake:
         while True:
             rows = await read_after(engine, org, cursor, BATCH)
+            try:
+                role = await check()  # every frame and every idle tick: a lapse sends nothing more
+            except NotFoundError:
+                return status.WS_1008_POLICY_VIOLATION
             if not rows:
                 await wake(FALLBACK)
                 continue
-            role = await role_in(engine, user, org)  # re-read before every frame
-            if role is None:
-                return status.WS_1008_POLICY_VIOLATION
             with anyio.move_on_after(SEND_TIMEOUT) as sent:
-                await ws.send_text(frame(org, rows, Role[role.upper()]))
+                await ws.send_text(frame(org, rows, role))
             if sent.cancelled_caught:
                 return None
             cursor = rows[-1]["seq"]
