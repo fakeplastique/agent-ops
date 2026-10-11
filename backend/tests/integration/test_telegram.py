@@ -49,7 +49,7 @@ class FakeBot:
 
     def __init__(self) -> None:
         self.calls: list[tuple[str, dict]] = []
-        self.hang: set[int] = set()  # chat ids whose calls never answer
+        self.hang: set[int] = set()  # chat ids whose calls answer only after 20 s
         self.next_id = 100
 
     async def handler(self, request: httpx2.Request) -> httpx2.Response:
@@ -57,7 +57,7 @@ class FakeBot:
         body = json.loads(request.content)
         self.calls.append((method, body))
         if body.get("chat_id") in self.hang:
-            await asyncio.sleep(3600)
+            await asyncio.sleep(20)  # bounded: a missing deadline fails the test, never hangs it
         self.next_id += 1
         return httpx2.Response(200, json={"ok": True, "result": {"message_id": self.next_id}})
 
