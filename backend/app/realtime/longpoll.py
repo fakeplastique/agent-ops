@@ -40,9 +40,10 @@ async def _release(redis: Redis, key: str, slot: str) -> None:
 
 @asynccontextmanager
 async def waiter_slot(
-    redis: Redis, org: uuid.UUID, user: uuid.UUID, now: float
+    redis: Redis, org: uuid.UUID, user: uuid.UUID, now: float, ttl: float = _SLOT_TTL
 ) -> AsyncIterator[None]:
-    """Hold one of the user's MAX_WAITERS slots (a Redis sorted set shared by every instance) for one poll.
+    """Hold one of the user's MAX_WAITERS slots (a Redis sorted set shared by every instance) for one poll
+    or one WebSocket (both transports draw from the same cap; `ttl` outlives the holder).
 
     Each slot is scored by its own expiry, so a crashed holder's slot drops out by itself. Over the cap is
     429 with Retry-After; a limiter outage is 503 (fails closed like the write limiter)."""
@@ -51,15 +52,17 @@ async def waiter_slot(
         try:
             async with redis.pipeline(transaction=True) as p:
                 p.zremrangebyscore(key, "-inf", now)
-                p.zadd(key, {slot: now + _SLOT_TTL})
+                p.zadd(key, {slot: now + ttl})
                 p.zcard(key)
                 p.zrange(key, 0, 0, withscores=True)
-                p.expire(key, _SLOT_TTL)
-                _, _, count, oldest, _ = await p.execute()
+                # The key lives as long as its longest slot: a short holder never cuts a long one's expiry.
+                p.expire(key, math.ceil(ttl), nx=True)
+                p.expire(key, math.ceil(ttl), gt=True)
+                _, _, count, oldest, _, _ = await p.execute()
         except (RedisError, OSError) as e:
             raise RateLimiterUnavailable from e
         if count > MAX_WAITERS:
-            raise RateLimited(min(_SLOT_TTL, math.ceil(oldest[0][1] - now)))
+            raise RateLimited(min(math.ceil(ttl), math.ceil(oldest[0][1] - now)))
         yield
     finally:
         # Its own task, shielded: a cancelled handler (anyio cancels again at every await) still releases,
@@ -68,6 +71,17 @@ async def waiter_slot(
         _releasing.add(task)
         task.add_done_callback(_releasing.discard)
         await asyncio.shield(task)
+
+
+def project_rows(rows: list[dict[str, Any]], role: Role) -> list[dict[str, Any]]:
+    """The events of a batch this role may read, each cut to its allow-list (long-poll and WebSocket)."""
+    events = []
+    for r in rows:
+        data = project(r["type"], r["payload"], role)
+        if data is not None:
+            keep = ("id", "seq", "type", "created_at")
+            events.append({k: r[k] for k in keep} | {"data": data})
+    return events
 
 
 async def poll(
@@ -88,14 +102,7 @@ async def poll(
     while True:
         rows = await read_after(engine, org, after, limit)
         if rows:
-            role = await recheck()
-            events = []
-            for r in rows:
-                data = project(r["type"], r["payload"], role)
-                if data is not None:
-                    keep = ("id", "seq", "type", "created_at")
-                    events.append({k: r[k] for k in keep} | {"data": data})
-            return events, rows[-1]["seq"]
+            return project_rows(rows, await recheck()), rows[-1]["seq"]
         remaining = deadline - time.monotonic()
         if remaining <= 0 or await gone():
             return [], after

@@ -27,6 +27,27 @@ class Resolved:
     organization_id: uuid.UUID
 
 
+def bearer_digest(authorization: str) -> str:
+    """The stored hash of a well-formed bearer token: a reference that never holds the token itself."""
+    match = _BEARER.fullmatch(authorization)
+    if match is None:
+        raise Unauthenticated
+    return hashlib.sha256(f"{match[1]}_{match[2]}".encode()).hexdigest()
+
+
+async def pat_live(engine: AsyncEngine, org: uuid.UUID, user: uuid.UUID, digest: str) -> bool:
+    """That user's personal access token in that organization is still unrevoked (read now)."""
+    async with tenant_session(engine, org) as session:
+        row = await session.execute(
+            text(
+                "select 1 from personal_access_tokens where organization_id = :o and user_id = :u"
+                " and token_hash = :h and revoked_at is null"
+            ),
+            {"o": org, "u": user, "h": digest},
+        )
+        return row.first() is not None
+
+
 async def resolve_bearer(engine: AsyncEngine, authorization: str | None) -> Resolved:
     """`Authorization: Bearer aop_...|pat_...` -> (principal, organization), read from the database on every
     request (no cache: a revoked or rotated token fails on the next call). The organization is the token's own,

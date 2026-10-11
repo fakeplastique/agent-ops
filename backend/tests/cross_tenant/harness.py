@@ -124,6 +124,7 @@ EXEMPT: set[str] = {
     "/api/v1/me/telegram/link-code",  # a code for the caller themselves
     # Telegram's updates: the tenant comes from the stored button handle, never the update (S31 tests)
     "/api/v1/telegram/webhook",
+    "/api/v1/realtime/ticket",  # same: the ticket is bound to the credential's organization
     # Cross-tenant by design for platform admins; everyone else gets 403 before any id is read
     # (tests/integration/test_flag_paths.py::test_platform_admin_only_from_env_allowlist).
     "/api/v1/platform/organizations/{organization_id}/plan",

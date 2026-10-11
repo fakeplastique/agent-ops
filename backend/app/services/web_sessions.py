@@ -95,6 +95,29 @@ async def load_session(engine: AsyncEngine, raw: str | None, clock: Clock) -> We
     return WebSession(row.user_id, row.selected_organization_id)
 
 
+def digest(raw: str) -> str:
+    """How a session is referenced without its cookie value (the row's own key)."""
+    return _hash(raw)
+
+
+async def session_live(
+    engine: AsyncEngine, session_digest: str, user: uuid.UUID, org: uuid.UUID, clock: Clock
+) -> bool:
+    """The session still exists, is in time and still has this user on this organization. Read only:
+    a realtime recheck does not slide the idle window (the next ticket request does)."""
+    now = clock.now()
+    async with engine.begin() as conn:
+        await conn.execute(_SET_HASH, {"h": session_digest})
+        row = (await conn.execute(_LOAD)).first()
+    return (
+        row is not None
+        and row.user_id == user
+        and row.selected_organization_id == org
+        and now < row.expires_at
+        and now < row.last_seen_at + IDLE
+    )
+
+
 async def role_in(
     engine: AsyncEngine, user_id: uuid.UUID, organization_id: uuid.UUID
 ) -> str | None:

@@ -14,6 +14,7 @@ from app.api.v1 import (
     plan,
     platform,
     policies,
+    realtime,
     receipts,
     stats,
     steps,
@@ -48,5 +49,6 @@ api_v1_router.include_router(stats.router)
 api_v1_router.include_router(events.router)
 api_v1_router.include_router(telegram_link.router)
 api_v1_router.include_router(telegram_webhook.router)
+api_v1_router.include_router(realtime.router)
 
 __all__ = ["api_v1_router"]

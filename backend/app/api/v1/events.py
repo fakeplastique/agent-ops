@@ -1,15 +1,17 @@
 import uuid
 from datetime import datetime
+from functools import partial
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Header, Query, Request
 from pydantic import BaseModel
 
-from app.api.deps import ActorDep, ClockDep, EngineDep, RedisDep, session_user
-from app.authz.matrix import Role
+from app.api.deps import COOKIE, ActorDep, ClockDep, EngineDep, RedisDep
 from app.authz.principals import UserPrincipal
-from app.authz.resolver import resolve_bearer
-from app.domain.errors import Forbidden, InvalidInput, NotFoundError, Unauthenticated
+from app.domain.errors import Forbidden
+from app.realtime import access
+from app.realtime.access import credential_of
+from app.realtime.feed import parse_cursor
 from app.realtime.longpoll import MAX_WAIT, poll, waiter_slot
 
 router = APIRouter(prefix="/events", tags=["realtime"])
@@ -28,16 +30,6 @@ class FeedOut(BaseModel):
     organization_id: uuid.UUID
     events: list[EventOut]
     after: int  # the cursor for the next poll (past dropped events too)
-
-
-_MAX_SEQ = 2**63 - 1  # bigint
-
-
-def _cursor(raw: str) -> int:
-    """Plain ASCII digits only: int() alone would also take "1_0", "+3" and " 3"."""
-    if not (raw.isascii() and raw.isdigit()) or len(raw) > 19 or int(raw) > _MAX_SEQ:
-        raise InvalidInput("after must be a sequence number (digits only)")
-    return int(raw)
 
 
 @router.get("", response_model=FeedOut)
@@ -60,23 +52,11 @@ async def long_poll(
         raise Forbidden("the event feed is for users")
     org = actor.organization_id
 
-    async def recheck() -> Role:
-        # The resolvers behind ActorDep, minus the login-failure counter: a lapse is no failed login.
-        # A lapse (or a switch to another org) is this org's 404.
-        try:
-            if authorization is not None:
-                now = (await resolve_bearer(engine, authorization)).principal
-            else:
-                now = await session_user(request, engine, clock)
-        except (Unauthenticated, Forbidden):
-            raise NotFoundError from None
-        if not isinstance(now, UserPrincipal) or now.user_id != actor.user_id:
-            raise NotFoundError
-        if now.organization_id != org:
-            raise NotFoundError
-        return now.role
+    # The credential ActorDep resolved, re-verified before a batch leaves (shared with /ws).
+    cred = credential_of(authorization, request.cookies.get(COOKIE))
+    recheck = partial(access.recheck, engine, cred, actor.user_id, org, clock)
 
-    cursor = _cursor(after)
+    cursor = parse_cursor(after)
     async with waiter_slot(redis, org, actor.user_id, clock.now().timestamp()):
         events, cursor = await poll(
             engine, org, cursor, wait, limit, recheck, request.is_disconnected
