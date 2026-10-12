@@ -52,8 +52,9 @@ export function ActionBar({
 }: {
   bundle: Bundle;
   step: PendingStep;
-  shortcuts: boolean;
-  onToggleShortcuts: () => void;
+  /** Omit both where the keyboard shortcuts are not offered (the detail screen). */
+  shortcuts?: boolean;
+  onToggleShortcuts?: () => void;
   onDecided: () => void;
   reload: () => void;
 }) {
@@ -193,12 +194,14 @@ export function ActionBar({
       )}
       <p id={`${id}-hint`} className="col-span-full m-0 flex flex-wrap items-center gap-x-2 text-small text-muted">
         <span>
-          You decide level {step.level} only.{" "}
-          {shortcuts ? "Shortcuts: A approves, R rejects." : "Shortcuts are off."}
+          You decide level {step.level} only.
+          {onToggleShortcuts && (shortcuts ? " Shortcuts: A approves, R rejects." : " Shortcuts are off.")}
         </span>
-        <button type="button" onClick={onToggleShortcuts} className="text-text underline underline-offset-2">
-          {shortcuts ? "Turn shortcuts off" : "Turn shortcuts on"}
-        </button>
+        {onToggleShortcuts && (
+          <button type="button" onClick={onToggleShortcuts} className="text-text underline underline-offset-2">
+            {shortcuts ? "Turn shortcuts off" : "Turn shortcuts on"}
+          </button>
+        )}
       </p>
     </div>
   );

@@ -61,7 +61,7 @@ export function Pane({
                   <h3 className="m-0 mb-2 text-body font-semibold">Reviewer votes</h3>
                   <VotesList decision={d} votes={b.votes} now={now} />
                 </section>
-                <section aria-label="Payload">
+                <section aria-label="Payload section">
                   <h3 className="m-0 mb-2 text-body font-semibold">
                     Payload <span className="font-normal text-small text-muted">from {agentName}, treated as data</span>
                   </h3>
