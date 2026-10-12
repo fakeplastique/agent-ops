@@ -2,7 +2,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { vi } from "vitest";
 
-import Page from "@/app/page";
+import Page from "@/app/status/page";
 
 const ready = { status: "ok", checks: { postgres: true, redis: true } };
 const down = { status: "unavailable", checks: { postgres: true, redis: false } };
