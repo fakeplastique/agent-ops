@@ -3,7 +3,6 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { LoginView } from "@/app/(auth)/login/LoginView";
-import { takeNext } from "@/lib/session";
 
 // An account-existence oracle: copy that says whether an email is known here.
 const ORACLE = /no account|not registered|not found|does not exist|doesn't exist|unknown (user|email)|already (has|have) an account|sign up/i;
@@ -57,17 +56,18 @@ describe("Login", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("Sign-in did not complete");
   });
 
-  it("Continue drops the previous user's local state and keeps a safe next for after the round trip", async () => {
+  // The API stores next with the login flow and honours it after Google; the page only passes a safe path along.
+  it("Continue drops the previous user's local state; a safe next rides on the login link", async () => {
     localStorage.setItem("draft", "user A");
     render(<LoginView error={null} next="/decisions?status=pending_votes" />);
-    await userEvent.click(screen.getByRole("link", { name: "Continue with Google" }));
+    const link = screen.getByRole("link", { name: "Continue with Google" });
+    expect(link).toHaveAttribute("href", "/api/v1/auth/login?next=%2Fdecisions%3Fstatus%3Dpending_votes");
+    await userEvent.click(link);
     expect(localStorage.getItem("draft")).toBeNull();
-    expect(takeNext()).toBe("/decisions?status=pending_votes");
   });
 
-  it("an off-site next is not kept", async () => {
+  it("an off-site next is not passed on", () => {
     render(<LoginView error={null} next="//evil.com/inbox" />);
-    await userEvent.click(screen.getByRole("link", { name: "Continue with Google" }));
-    expect(takeNext()).toBeNull();
+    expect(screen.getByRole("link", { name: "Continue with Google" })).toHaveAttribute("href", "/api/v1/auth/login");
   });
 });

@@ -1,5 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
+import { fakeApp, TITLE_A, TITLE_B } from "./app-fake";
+
 // FM31: an identity or organization change leaves nothing of the previous one in the DOM, in memory or in storage.
 // Google is not reachable here: the API is faked at the browser edge, one signed-in user at a time.
 
@@ -131,4 +133,55 @@ test("an invitation for another account names it", async ({ page }, info) => {
   await page.getByRole("button", { name: "Accept invitation" }).click();
   await expect(page.getByText("This invitation is for a@x.com")).toBeVisible();
   await page.screenshot({ path: `test-results/invite-mismatch-${info.project.name}.png`, fullPage: true });
+});
+
+// With a row selected and a rejection comment half-typed: the screen a stale cache would hurt most.
+async function openRowWithDraft(page: Page) {
+  await page.goto("/inbox");
+  await page.getByRole("button", { name: new RegExp(TITLE_A) }).click();
+  await page.getByLabel(/Comment/).fill("draft reason typed by user A");
+  await leaveTraces(page, "user-a");
+  await expect(page.getByRole("heading", { level: 2, name: TITLE_A })).toBeVisible();
+}
+
+// The sidebar folds into a menu sheet at 375 px; its copy of the controls is the only one on screen.
+async function sidebar(page: Page, narrow: boolean) {
+  if (narrow) await page.getByRole("button", { name: "Menu" }).click();
+}
+
+test("switching organization with a row selected and a comment typed leaves nothing of the first organization", async ({ page }, info) => {
+  await fakeApp(page);
+  await openRowWithDraft(page);
+  await sidebar(page, info.project.name === "narrow-375");
+  const reloaded = page.waitForEvent("load");
+  await page.getByRole("combobox", { name: "Organization" }).selectOption("org-b");
+  await reloaded;
+  await expect(page).toHaveURL(/\/inbox$/);
+  await expect(page.getByRole("button", { name: new RegExp(TITLE_B) })).toBeVisible();
+  const after = await traces(page);
+  expectClean(after);
+  expect(after.text).not.toContain(TITLE_A);
+  expect(after.text).not.toContain("draft reason");
+  expect(await page.getByLabel(/Comment/).inputValue()).toBe("");
+  expect(await page.content()).not.toContain(TITLE_A);
+});
+
+test("user A signs out with a row and a draft open, user B signs in: nothing of A is left", async ({ page }, info) => {
+  const state = await fakeApp(page);
+  await page.route("**/api/v1/auth/login", (route) => {
+    state.user = "user-b";
+    state.org = "org-b";
+    return route.fulfill({ status: 302, headers: { location: "/inbox" } });
+  });
+  await openRowWithDraft(page);
+  await sidebar(page, info.project.name === "narrow-375");
+  await page.getByRole("button", { name: "Sign out" }).first().click();
+  await expect(page).toHaveURL(/\/login$/);
+  expectClean(await traces(page));
+  await page.getByRole("link", { name: "Continue with Google" }).click();
+  await expect(page.getByRole("button", { name: new RegExp(TITLE_B) })).toBeVisible();
+  const after = await traces(page);
+  expectClean(after);
+  expect(after.text).not.toContain(TITLE_A);
+  expect(await page.content()).not.toContain("draft reason");
 });

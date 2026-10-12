@@ -2,7 +2,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { Onboarding } from "@/app/(app)/onboarding/Onboarding";
+import { Onboarding } from "@/app/(auth)/onboarding/Onboarding";
 import { goTo } from "@/lib/api/navigate";
 
 vi.mock("@/lib/api/navigate", () => ({ goTo: vi.fn() }));

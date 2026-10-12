@@ -19,7 +19,7 @@ export class ApiError extends Error {
 }
 
 /** timeoutMs covers the whole call, body included (default 15 s; the /events long-poll needs longer). */
-type Options = { method?: string; body?: unknown; signal?: AbortSignal; timeoutMs?: number };
+type Options = { method?: string; body?: unknown; headers?: Record<string, string>; signal?: AbortSignal; timeoutMs?: number };
 
 const timedOut = () => new ApiError(0, "timeout", "The server took too long to answer");
 
@@ -73,7 +73,7 @@ function toLogin() {
 /** Same-origin JSON call to the REST API. Resolves only on 2xx; everything else rejects with ApiError. */
 export async function api<T = unknown>(
   path: string,
-  { method = "GET", body, signal, timeoutMs = TIMEOUT_MS }: Options = {},
+  { method = "GET", body, headers, signal, timeoutMs = TIMEOUT_MS }: Options = {},
 ): Promise<T> {
   const deadline = new AbortController();
   const timer = setTimeout(() => deadline.abort(), timeoutMs);
@@ -85,8 +85,9 @@ export async function api<T = unknown>(
         fetch(`${BASE}${path}`, {
           method,
           credentials: "same-origin",
-          headers: body === undefined ? undefined : { "content-type": "application/json" },
-          body: body === undefined ? undefined : JSON.stringify(body),
+          // FormData keeps its own multipart content type (the boundary is the browser's to set).
+          headers: { ...(body === undefined || body instanceof FormData ? {} : { "content-type": "application/json" }), ...headers },
+          body: body === undefined ? undefined : body instanceof FormData ? body : JSON.stringify(body),
           signal: signal ? AbortSignal.any([signal, deadline.signal]) : deadline.signal,
         }),
       );
