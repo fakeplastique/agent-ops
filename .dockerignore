@@ -10,3 +10,9 @@ backend/postman
 
 # A downloaded Google OAuth client secret must never reach an image build
 client_secret_*.json
+
+# Local agent state, worktrees and skills: never part of an image (gigabytes of lane checkouts)
+.claude
+.agent
+skills
+**/node_modules
