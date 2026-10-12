@@ -80,3 +80,12 @@ async def test_agent_input_validated(web, app_engine, owner_engine):
     owned = {"name": "owned", "owner_user_id": str(w.owner_user)}
     r = await web.client.post(AG, json=owned, headers=admin)
     assert r.status_code == 201 and r.json()["owner_user_id"] == str(w.owner_user)
+
+
+async def test_revoked_agent_reports_when_it_was_revoked(web, app_engine, owner_engine):
+    _, admin = await _admin(app_engine, owner_engine)
+    agent = (await web.client.post(AG, json={"name": "bot"}, headers=admin)).json()
+    assert (await web.client.delete(f"{AG}/{agent['id']}", headers=admin)).status_code == 204
+    after = (await web.client.get(f"{AG}/{agent['id']}", headers=admin)).json()
+    # catches: a revoked agent shown with no date, or the creation date presented as revocation
+    assert after["status"] == "revoked" and after["updated_at"] > after["created_at"]

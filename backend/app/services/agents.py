@@ -9,7 +9,7 @@ from app.services import audit
 from app.services.tokens import issue_agent_token
 from app.services.validation import check_text
 
-_COLS = "id, name, description, vendor, owner_user_id, status, created_at"
+_COLS = "id, name, description, vendor, owner_user_id, status, created_at, updated_at"
 _MEMBER = text("select 1 from memberships where organization_id = :o and user_id = :u")
 _INSERT = text(
     "insert into agent_identities (organization_id, name, description, vendor, owner_user_id)"
