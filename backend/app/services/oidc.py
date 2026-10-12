@@ -33,6 +33,16 @@ class OidcConfig:
 class Identity:
     email: str
     name: str
+    next: str | None = (
+        None  # where the user was going before sign-in (already checked by safe_next)
+    )
+
+
+def safe_next(raw: str | None) -> str | None:
+    """A same-origin relative path or None; the same rule as the web's safeNext (no `//`, backslash or control chars)."""
+    if not raw or len(raw) > 2000 or not raw.startswith("/") or raw.startswith("//"):
+        return None
+    return None if any(c == "\\" or ord(c) < 32 or ord(c) == 127 for c in raw) else raw
 
 
 def _client(cfg: OidcConfig) -> AsyncOAuth2Client:
@@ -57,7 +67,9 @@ async def _discover(cfg: OidcConfig) -> dict[str, str]:
     return doc
 
 
-async def begin_login(cfg: OidcConfig, redis: Redis) -> tuple[str, str]:
+async def begin_login(
+    cfg: OidcConfig, redis: Redis, next_path: str | None = None
+) -> tuple[str, str]:
     """(issuer URL, state): state, nonce and a PKCE S256 challenge, all single-use. The caller binds `state` to
     the browser with a cookie: without that, a callback URL planted in another browser would log it in as us."""
     try:
@@ -71,7 +83,11 @@ async def begin_login(cfg: OidcConfig, redis: Redis) -> tuple[str, str]:
         doc["authorization_endpoint"], state=state, nonce=nonce, code_verifier=verifier
     )
     try:
-        await redis.set(f"oidc:{state}", json.dumps({"v": verifier, "n": nonce}), ex=FLOW_TTL)
+        await redis.set(
+            f"oidc:{state}",
+            json.dumps({"v": verifier, "n": nonce, "next": safe_next(next_path)}),
+            ex=FLOW_TTL,
+        )
     except Exception as e:  # noqa: BLE001 - no flow store, no login: unavailable, not a 500 and not a half-flow
         log.warning("oidc flow store failed: %s", type(e).__name__)
         raise LoginUnavailable from None
@@ -142,4 +158,5 @@ async def _complete(
     return Identity(
         email.strip().lower(),
         (name if isinstance(name, str) and name.strip() else email.split("@")[0])[:200],
+        safe_next(flow.get("next")),  # re-checked on the way out, whatever the store held
     )

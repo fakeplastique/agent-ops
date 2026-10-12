@@ -40,6 +40,10 @@ ROUTES: dict[tuple[str, str], str] = {
         "POST",
         "/api/v1/decision-requests/{decision_request_id}/messages",
     ): "tenant B posts into tenant A's discussion",
+    (
+        "GET",
+        "/api/v1/decision-requests/{decision_request_id}/steps",
+    ): "tenant B reads tenant A's approval ladder",
     # Probed by tests/cross_tenant/test_steps_receipts.py.
     (
         "POST",
@@ -103,6 +107,8 @@ EXEMPT: set[str] = {
     "/api/v1/invitations/accept",
     "/api/v1/members",
     "/api/v1/me",  # the caller's own principal, no id parameter to swap
+    # The caller's own memberships by the self lookup policy, no id parameter (tests/integration/test_my_organizations.py).
+    "/api/v1/me/organizations",
     "/api/v1/decision-requests",  # create and list: the tenant comes from the caller
     "/api/v1/me/pending-approvals",  # the caller's own inbox, no id parameter
     # Public by design (PRODUCT 3.2): answers only valid true/false, whoever's receipt it is.

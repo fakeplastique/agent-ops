@@ -26,6 +26,15 @@ def state_of(location: str) -> str:
     return parse_qs(urlparse(location).query)["state"][0]
 
 
+def failed(r) -> bool:
+    """A refused login sends the browser to the login page with one fixed code, never a body and never a cookie."""
+    return (
+        r.status_code == 302
+        and r.headers["location"] == f"{ORIGIN}/login?error=login_failed"
+        and "set-cookie" not in r.headers
+    )
+
+
 def email() -> str:
     return f"user-{uuid.uuid4()}@example.test"
 
@@ -41,7 +50,7 @@ async def session_info(web):
 async def test_login_creates_the_user_once_and_opens_a_session(web, owner_engine):
     addr = email()
     r = await web.login(addr.upper(), name="Ada Lovelace")
-    assert r.status_code == 302 and r.headers["location"] == ORIGIN + "/"
+    assert r.status_code == 302 and r.headers["location"] == ORIGIN + "/inbox"
     rows = await fetch(
         owner_engine,
         "select email, full_name, platform_admin from users where email=:e",
@@ -75,11 +84,11 @@ async def test_unverified_email_refused(web, owner_engine):
     r = await web.login(
         addr, email_verified=False
     )  # catches: an unverified Google address creating a user
-    assert r.status_code == 400 and r.json()["error"]["code"] == "login_failed"
+    assert failed(r)
     assert await fetch(owner_engine, "select 1 from users where email=:e", e=addr) == []
-    assert "set-cookie" not in r.headers and (await session_info(web)).status_code == 401
+    assert (await session_info(web)).status_code == 401
     for bad in ("true", 1, None):  # only the boolean true counts
-        assert (await web.login(email(), email_verified=bad)).status_code == 400
+        assert failed(await web.login(email(), email_verified=bad))
 
 
 async def test_missing_or_blank_email_refused(web):
@@ -92,7 +101,7 @@ async def test_missing_or_blank_email_refused(web):
         {"email": "a\n@example.test"},
     ):
         web.fake.override = claims
-        assert (await web.login("x@example.test")).status_code == 400
+        assert failed(await web.login("x@example.test"))
 
 
 async def test_state_and_pkce_mismatch_refused(web):
@@ -102,16 +111,14 @@ async def test_state_and_pkce_mismatch_refused(web):
     state = state_of(start.headers["location"])
     forged = path.replace("state=", "state=x")
     bind_browser(web, "x" + state)
-    assert (await web.client.get(forged)).status_code == 400  # a state we never issued
-    assert (
-        await web.client.get("/api/v1/auth/callback?code=abc")
-    ).status_code == 400  # no state at all
+    assert failed(await web.client.get(forged))  # a state we never issued
+    assert failed(await web.client.get("/api/v1/auth/callback?code=abc"))  # no state at all
     bind_browser(web, state)
     ok = await web.client.get(path)
     assert ok.status_code == 302
     replay = web.fake.authorize(start.headers["location"], email())  # the state is single use
     bind_browser(web, state)
-    assert (await web.client.get(replay.removeprefix(ORIGIN))).status_code == 400
+    assert failed(await web.client.get(replay.removeprefix(ORIGIN)))
     # code injection: a code minted for flow B redeemed with flow A's state (and so A's PKCE verifier)
     a = await web.client.get("/api/v1/auth/login")
     b = await web.client.get("/api/v1/auth/login")
@@ -121,9 +128,7 @@ async def test_state_and_pkce_mismatch_refused(web):
         web, state_a
     )  # this browser did start flow A: only PKCE can stop the injected code
     injected = await web.client.get(f"/api/v1/auth/callback?code={code_b}&state={state_a}")
-    assert (
-        injected.status_code == 400 and "set-cookie" not in injected.headers
-    )  # PKCE: the verifier does not match
+    assert failed(injected)  # PKCE: the verifier does not match
 
 
 async def test_login_csrf_a_callback_planted_in_another_browser_is_refused(web, owner_engine):
@@ -138,10 +143,8 @@ async def test_login_csrf_a_callback_planted_in_another_browser_is_refused(web, 
     )  # ...and keeps the callback URL
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url=ORIGIN) as victim:
         r = await victim.get(planted)  # the victim's browser is tricked into visiting it
-        assert (
-            r.status_code == 400 and r.json()["error"]["code"] == "login_failed"
-        )  # catches: login CSRF
-        assert "set-cookie" not in r.headers and victim.cookies.get("aop_session") is None
+        assert failed(r)  # catches: login CSRF
+        assert victim.cookies.get("aop_session") is None
     assert await fetch(owner_engine, "select 1 from users where email=:e", e=addr) == []
     assert (
         await web.client.get(planted)
@@ -152,7 +155,7 @@ async def test_a_state_cookie_from_another_flow_is_refused(web):
     a = await web.client.get("/api/v1/auth/login")
     b = await web.client.get("/api/v1/auth/login")  # the cookie jar now holds flow B's state
     callback_a = web.fake.authorize(a.headers["location"], email()).removeprefix(ORIGIN)
-    assert (await web.client.get(callback_a)).status_code == 400  # A's code with B's cookie
+    assert failed(await web.client.get(callback_a))  # A's code with B's cookie
     bind_browser(web, state_of(a.headers["location"]))
     assert (await web.client.get(callback_a)).status_code == 302  # a mismatch did not burn flow A
     assert b
@@ -204,7 +207,7 @@ async def test_a_bad_id_token_refused(web, owner_engine, bad):
     addr = email()
     web.fake.override = bad
     r = await web.login(addr)
-    assert r.status_code == 400 and r.json()["error"]["code"] == "login_failed"
+    assert failed(r)
     assert await fetch(owner_engine, "select 1 from users where email=:e", e=addr) == []
 
 
@@ -213,8 +216,9 @@ async def test_every_login_failure_has_the_same_body(web):
     for bad in ({"nonce": "x"}, {"aud": "x"}, {"exp": 1}, {"email_verified": False}):
         web.fake.override = bad
         r = await web.login(email())
-        bodies.add(r.text)
-    bodies.add((await web.client.get("/api/v1/auth/callback?code=a&state=b")).text)
+        bodies.add((r.status_code, r.headers["location"], r.text))
+    other = await web.client.get("/api/v1/auth/callback?code=a&state=b")
+    bodies.add((other.status_code, other.headers["location"], other.text))
     assert len(bodies) == 1  # catches: telling an attacker which check failed
 
 

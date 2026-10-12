@@ -64,7 +64,11 @@ PLAN |= {("post", "/api/v1/me/telegram/link-code")}  # flag `telegram`
 PUBLIC = {"/healthz", "/readyz", "/api/v1/auth/login", "/api/v1/auth/callback"}
 PUBLIC |= {"/api/v1/auth/logout", "/api/v1/receipts/verify"}
 UNLIMITED = {"/api/v1/auth/logout", "/api/v1/auth/organization"}  # session-only, no write limit
-NO_ROLE = {"/api/v1/auth/session", "/api/v1/me"}  # identity reads: any valid credential passes
+NO_ROLE = {
+    "/api/v1/auth/session",
+    "/api/v1/me",
+    "/api/v1/me/organizations",
+}  # identity reads: any valid credential passes
 
 
 def _spec() -> dict:
