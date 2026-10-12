@@ -264,6 +264,66 @@ async def trial(
     }
 
 
+async def logout(
+    a: argparse.Namespace, sessions: dict[str, tuple[str, str, str]]
+) -> None:
+    async with httpx2.AsyncClient(base_url=a.base) as h:
+        for cookie, _, _ in sessions.values():
+            await h.post(
+                "/api/v1/auth/logout",
+                headers={"Origin": a.origin, "Cookie": f"{COOKIE}={cookie}"},
+            )
+
+
+async def load(
+    a: argparse.Namespace, sessions: dict[str, tuple[str, str, str]]
+) -> dict[str, Any]:
+    """Load check: `--clients` workers read the decision list as fast as the API answers for `--load` seconds."""
+    proc, cookies, lat, errors = Proc(a.pid), [v[0] for v in sessions.values()], [], 0
+    stop = time.perf_counter() + a.load
+
+    async def worker(i: int) -> None:
+        nonlocal errors
+        c = Client(
+            httpx2.AsyncClient(base_url=a.base, timeout=60),
+            cookies[i % len(cookies)],
+            Wire(),
+        )
+        async with c.http:
+            while time.perf_counter() < stop:
+                t = time.perf_counter()
+                r = await c.http.get(
+                    "/api/v1/decision-requests?limit=20", headers=_hdr(c)
+                )
+                lat.append((time.perf_counter() - t) * 1000)
+                errors += r.status_code != 200
+
+    cpu0, t0 = proc.cpu(), time.perf_counter()
+    await asyncio.gather(*(worker(i) for i in range(a.clients)))
+    wall, lat = time.perf_counter() - t0, sorted(lat)
+    cpu1 = proc.cpu()
+    pick = lambda q: round(lat[int(q * (len(lat) - 1))], 1)
+    return {
+        "load": "GET /api/v1/decision-requests?limit=20",
+        "clients": a.clients,
+        "seconds": round(wall, 1),
+        "requests": len(lat),
+        "errors": errors,
+        "requests_per_s": round(len(lat) / wall, 1),
+        "latency_ms": {
+            "p50": pick(0.5),
+            "p95": pick(0.95),
+            "p99": pick(0.99),
+            "max": round(lat[-1], 1),
+        },
+        "server_cpu_pct": None
+        if cpu0 is None or cpu1 is None
+        else round((cpu1 - cpu0) / wall * 100, 1),
+        "server_rss_mb": proc.rss_mb(),
+        "load_avg_1m": os.getloadavg()[0],
+    }
+
+
 async def main(a: argparse.Namespace) -> dict[str, Any]:
     if a.smoke:
         a.clients, a.events, a.interval = 10, 3, 1.0
@@ -273,11 +333,16 @@ async def main(a: argparse.Namespace) -> dict[str, Any]:
         u for u in users if u["role"] == "org_admin"
     )  # the producer; its org is the one measured
     mates = [u["email"] for u in users if u["organization"] == admin["organization"]]
-    if a.clients > CAP * len(mates):
+    if not a.load and a.clients > CAP * len(mates):
         sys.exit(
             f"{a.clients} clients need {-(-a.clients // CAP)} users; {admin['organization']} has {len(mates)}"
         )
     sessions = {e: await sign_in(a.base, a.origin, e) for e in mates}
+    if a.load:
+        try:
+            return await load(a, sessions)
+        finally:
+            await logout(a, sessions)
 
     def new_client(email: str) -> Client:
         return Client(
@@ -306,12 +371,7 @@ async def main(a: argparse.Namespace) -> dict[str, Any]:
     finally:
         for c in [producer, *clients]:
             await c.http.aclose()
-        async with httpx2.AsyncClient(base_url=a.base) as h:
-            for cookie, _, _ in sessions.values():
-                await h.post(
-                    "/api/v1/auth/logout",
-                    headers={"Origin": a.origin, "Cookie": f"{COOKIE}={cookie}"},
-                )
+        await logout(a, sessions)
     return {"clients": a.clients, "organization": admin["organization"], "interval_s": a.interval,
             "cpus": os.cpu_count(), "results": results}  # fmt: skip
 
@@ -351,7 +411,13 @@ if __name__ == "__main__":
     p.add_argument(
         "--smoke", action="store_true", help="10 clients, 3 events, 1 s apart"
     )
+    p.add_argument(
+        "--load",
+        type=int,
+        metavar="SECONDS",
+        help="load check: read the decision list with --clients workers",
+    )
     p.add_argument("--json", action="store_true")
     args = p.parse_args()
     out = asyncio.run(main(args))
-    print(json.dumps(out, indent=1) if args.json else table(out))
+    print(json.dumps(out, indent=1) if args.json or args.load else table(out))
