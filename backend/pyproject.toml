@@ -16,10 +16,16 @@ dependencies = [
   "cryptography>=50.0.2",
   "httpcore2>=2.16.0",
   "idna>=3.20",
+  "boto3>=1.43.123",
 ]
 
 [dependency-groups]
-dev = ["pytest>=8", "ruff>=0.8", "pyright>=1.1.390"]
+dev = [
+    "pytest>=8",
+    "ruff>=0.8",
+    "pyright>=1.1.390",
+    "moto[s3]>=5.2.5",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

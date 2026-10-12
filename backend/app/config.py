@@ -1,4 +1,5 @@
 import os
+import tempfile
 
 from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings
@@ -9,6 +10,7 @@ from app.domain.secretbox import SecretBox
 DEV_RECEIPT_KEYS = "dev:dev-receipt-key-not-for-production"
 # base64 of "dev-webhook-key-not-for-prod-use" (32 bytes)
 DEV_WEBHOOK_SECRET_KEYS = "dev:ZGV2LXdlYmhvb2sta2V5LW5vdC1mb3ItcHJvZC11c2U="
+DEV_FILE_URL_SECRET = "dev-file-url-secret-not-for-production"
 
 
 class Settings(BaseSettings):
@@ -46,6 +48,16 @@ class Settings(BaseSettings):
     telegram_bot_token: str = ""
     telegram_webhook_secret: str = ""
     telegram_bot_username: str = ""  # for the t.me deep link
+    # Attachments (S32): "local" keeps files on disk (dev, tests), "s3" uses any S3-compatible bucket.
+    file_storage: str = "local"
+    file_local_root: str = os.path.join(tempfile.gettempdir(), "agent-ops-files")
+    file_url_secret: str = DEV_FILE_URL_SECRET  # signs local download URLs; not used with s3
+    s3_endpoint_url: str = ""
+    s3_public_endpoint_url: str = ""  # what a browser reaches; defaults to s3_endpoint_url
+    s3_bucket: str = ""
+    s3_access_key: str = ""
+    s3_secret_key: str = ""
+    s3_region: str = "garage"
 
     @field_validator("database_url", "migrate_database_url", "worker_database_url")
     @classmethod
@@ -69,6 +81,18 @@ class Settings(BaseSettings):
             )
         if os.environ.get("RAILWAY_ENVIRONMENT") and self.webhooks_allow_http:
             raise ValueError("WEBHOOKS_ALLOW_HTTP is for local dev: hosted webhooks are https only")
+        if self.file_storage not in ("local", "s3"):
+            raise ValueError("FILE_STORAGE must be local or s3")
+        if self.file_storage == "s3" and not (self.s3_bucket and self.s3_access_key):
+            raise ValueError("FILE_STORAGE=s3 needs S3_BUCKET, S3_ACCESS_KEY and S3_SECRET_KEY")
+        if (
+            os.environ.get("RAILWAY_ENVIRONMENT")
+            and self.file_storage == "local"
+            and self.file_url_secret == DEV_FILE_URL_SECRET
+        ):
+            raise ValueError(
+                "FILE_URL_SECRET must be set on Railway: the dev secret is public in git"
+            )
         return self
 
 

@@ -218,6 +218,7 @@ def test_hosted_environment_refuses_the_dev_receipt_key(monkeypatch):
         Settings()
     monkeypatch.setenv("RECEIPT_KEYS", f"prod1:{'z' * 40}")
     monkeypatch.setenv("WEBHOOK_SECRET_KEYS", f"prod1:{'A' * 43}=")  # its own Railway check (S27)
+    monkeypatch.setenv("FILE_URL_SECRET", "f" * 32)  # and S32's
     assert Settings().receipt_keys.startswith("prod1:")
     monkeypatch.delenv("RAILWAY_ENVIRONMENT")
     monkeypatch.delenv("RECEIPT_KEYS")
