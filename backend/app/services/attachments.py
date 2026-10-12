@@ -50,7 +50,7 @@ _ONE = text(
     f"select {_COLUMNS}, storage_key from attachments"
     " where organization_id = :o and decision_request_id = :r and id = :a"
 )
-_DELETE = text("delete from attachments where organization_id = :o and id = :a")
+_DELETE = text("delete from attachments where organization_id = :o and id = :a returning id")
 
 
 @dataclass(frozen=True)
@@ -202,7 +202,8 @@ async def remove(
     mine = (row["uploaded_by_type"], row["uploaded_by_id"]) == (by.kind, by.id)
     if not mine and not (by.role is not None and can(by.role, Action.MANAGE_ORG)):
         raise Forbidden("only the uploader or an org_admin may remove this file")
-    await session.execute(_DELETE, {"o": o, "a": attachment_id})
+    if (await session.execute(_DELETE, {"o": o, "a": attachment_id})).first() is None:
+        raise NotFoundError  # a concurrent remove won: one audit row, one object drop
     data = {"decision_request_id": str(request_id), "size_bytes": row["size_bytes"]}
     await audit.record(session, o, "attachment", attachment_id, "removed", by.kind, by.id, data)
     return row["storage_key"]

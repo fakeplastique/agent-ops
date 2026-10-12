@@ -24,7 +24,10 @@ class S3Storage:
         region: str,
     ) -> None:  # fmt: skip
         self.bucket = bucket
-        cfg = Config(signature_version="s3v4", s3={"addressing_style": "path"})
+        cfg = Config(
+            signature_version="s3v4", s3={"addressing_style": "path"},
+            connect_timeout=5, read_timeout=30, retries={"max_attempts": 2},
+        )  # fmt: skip
 
         def client(url: str) -> Any:
             return boto3.client(
