@@ -7,6 +7,7 @@ import pytest
 from mcp import Client
 from mcp.client.streamable_http import streamable_http_client
 
+from app.adapters.storage_local import LocalStorage
 from app.api import deps
 from app.mcp.server import http_app
 from tests.conftest import TEST_REDIS
@@ -36,13 +37,16 @@ class Mcp:
 
 
 @pytest.fixture
-async def mcp(app_engine, monkeypatch) -> AsyncIterator[Mcp]:
+async def mcp(app_engine, monkeypatch, tmp_path) -> AsyncIterator[Mcp]:
     """The MCP endpoint as main.py serves it, on the test database and Redis db 15 (write limits)."""
     from redis.asyncio import Redis
 
     redis = Redis.from_url(TEST_REDIS)
     monkeypatch.setattr(deps, "_engine", app_engine)
     monkeypatch.setattr(deps, "_redis", redis)
+    monkeypatch.setattr(  # attachments land under the test's own directory, never a shared one
+        deps, "_storage", LocalStorage(tmp_path / "files", "mcp-test-secret", deps.get_clock())
+    )
     app = http_app()
     async with app.router.lifespan_context(app):
         yield Mcp(app)

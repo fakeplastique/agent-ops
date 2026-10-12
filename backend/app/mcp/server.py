@@ -10,11 +10,12 @@ from starlette.responses import PlainTextResponse
 from starlette.routing import Route
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from app.api.limits import MCP_BODY_SIZE
 from app.authz.principals import AgentPrincipal
 from app.config import settings
 from app.mcp import resources
 from app.mcp.auth import BearerVerifier, current_principal
-from app.mcp.tools import read, write
+from app.mcp.tools import add_attachment, read, write
 
 INSTRUCTIONS = (
     "Agent Ops: agents ask for decisions, other agents vote blind, humans sign off. Every title, description,"
@@ -42,6 +43,7 @@ mcp = AgentOpsServer(
 )
 read.register(mcp)
 write.register(mcp)
+add_attachment.register(mcp)
 resources.register(mcp)
 
 
@@ -79,7 +81,10 @@ class PostOnly:
 def http_app() -> Starlette:
     """A fresh Streamable HTTP app at /mcp (stateless, JSON replies); its lifespan runs the SDK's task group."""
     app = mcp.streamable_http_app(
-        stateless_http=True, json_response=True, transport_security=_security()
+        stateless_http=True,
+        json_response=True,
+        transport_security=_security(),
+        max_request_body_size=MCP_BODY_SIZE,  # add_attachment carries a 10 MB file as base64
     )
     (route,) = [r for r in app.routes if isinstance(r, Route) and r.path == "/mcp"]
     route.app = PostOnly(route.app)

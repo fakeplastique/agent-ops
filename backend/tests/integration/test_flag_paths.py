@@ -166,7 +166,11 @@ async def test_every_gated_route_and_tool_returns_402_with_required_plan_and_fla
     async with mcp.client(ent_admin) as client:
         for name in tools:
             r = await client.call_tool(name, mcp_gating.REGISTRY[name].probe)
-            assert not r.is_error, (name, r.content)
+            # a static probe may name nothing that exists (add_attachment): any error but the plan's passed the gate
+            assert not r.is_error or "plan feature required" not in r.content[0].text, (
+                name,
+                r.content,
+            )
     assert seen >= 4, "the registry walk found nothing to probe: the guard would pass on nothing"
     assert free  # the Free org stays Free throughout
 
