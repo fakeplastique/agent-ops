@@ -33,13 +33,15 @@ def _last_admin(e: IntegrityError) -> Exception:
 
 
 async def create_organization(
-    engine: AsyncEngine, user_id: uuid.UUID, name: str, slug: str
+    engine: AsyncEngine, user_id: uuid.UUID, name: str, slug: str, org_id: uuid.UUID | None = None
 ) -> uuid.UUID:
-    """A new organization with its creator as the first org_admin, in one transaction (never an org without one)."""
+    """A new organization with its creator as the first org_admin, in one transaction (never an org without one).
+
+    `org_id` lets the demo seed use a stable id; the API never passes it."""
     check_text("name", name, 1, 80)
     if not _SLUG.fullmatch(slug):
         raise InvalidInput("slug must be 3-40 characters: lowercase letters, digits and hyphens")
-    org = uuid.uuid4()
+    org = org_id or uuid.uuid4()
     try:
         async with engine.begin() as c:
             await use_tenant(c, org)  # the tenant root is its own tenant
