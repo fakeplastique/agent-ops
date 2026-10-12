@@ -126,8 +126,10 @@ def _unsigned(claims: dict[str, Any]) -> str:
 
 
 class Harness:
-    def __init__(self, client: httpx.AsyncClient, fake: FakeIssuer, clock: Tick) -> None:
-        self.client, self.fake, self.clock = client, fake, clock
+    def __init__(
+        self, client: httpx.AsyncClient, fake: FakeIssuer, clock: Tick, storage: Any = None
+    ) -> None:
+        self.client, self.fake, self.clock, self.storage = client, fake, clock, storage
 
     async def login(self, email: str, name: str = "Test User", **claims: Any) -> httpx.Response:
         """The whole browser dance; returns the callback response."""

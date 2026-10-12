@@ -2,10 +2,12 @@ from fastapi import APIRouter
 
 from app.api.v1 import (
     agents,
+    attachments,
     audit,
     auth,
     decisions,
     events,
+    files,
     invitations,
     me,
     members,
@@ -34,6 +36,8 @@ api_v1_router.include_router(members.router)
 api_v1_router.include_router(decisions.router)
 api_v1_router.include_router(votes.router)
 api_v1_router.include_router(messages.router)
+api_v1_router.include_router(attachments.router)
+api_v1_router.include_router(files.router)
 api_v1_router.include_router(steps.router)
 api_v1_router.include_router(receipts.router)
 api_v1_router.include_router(audit.router)

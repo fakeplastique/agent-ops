@@ -19,6 +19,7 @@ from app.services import audit, webhook_security
 EVENT_TYPES = frozenset({
     "decision.created", "decision.status_changed", "decision.revised", "vote.cast", "round.revealed",
     "step.created", "step.decided", "step.timed_out", "message.posted", "plan.changed",
+    "attachment.added",
 })  # fmt: skip
 MAX_SUBSCRIPTIONS = 20  # per organization: each one is a fan-out of outbound requests per event
 
