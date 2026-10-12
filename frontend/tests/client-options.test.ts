@@ -19,14 +19,22 @@ describe("api client request options", () => {
     expect(headers.get("content-type")).toBe("application/json");
   });
 
+  it("sends a File as the raw body, so the browser sets its own content type", async () => {
+    const fetchMock = reply(201);
+    vi.stubGlobal("fetch", fetchMock);
+    const file = new File(["x"], "a.txt", { type: "text/plain" });
+    await api("/decision-requests/1/attachments?filename=a.txt", { method: "POST", body: file });
+    const init = (fetchMock.mock.calls[0] as unknown[])[1] as RequestInit;
+    expect(init.body).toBe(file);
+    expect(new Headers(init.headers).get("content-type")).toBeNull();
+  });
+
   it("sends FormData as is, so the browser sets the multipart boundary", async () => {
     const fetchMock = reply(201);
     vi.stubGlobal("fetch", fetchMock);
     const form = new FormData();
-    form.set("file", new Blob(["x"]), "a.txt");
-    await api("/decision-requests/1/attachments", { method: "POST", body: form });
-    const init = (fetchMock.mock.calls[0] as unknown[])[1] as RequestInit;
-    expect(init.body).toBe(form);
-    expect(new Headers(init.headers).get("content-type")).toBeNull();
+    form.set("a", "b");
+    await api("/x", { method: "POST", body: form });
+    expect(((fetchMock.mock.calls[0] as unknown[])[1] as RequestInit).body).toBe(form);
   });
 });
