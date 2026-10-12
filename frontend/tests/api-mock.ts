@@ -1,7 +1,8 @@
 import { vi } from "vitest";
 
 type Reply = { status?: number; body?: unknown };
-type Handler = object | ((req: { body: any; method: string; path: string }) => Reply | Promise<Reply>);
+export type Req = { body: any; method: string; path: string };
+type Handler = object | ((req: Req) => Reply | Promise<Reply>);
 
 export const err = (status: number, code: string, message: string, details: Record<string, unknown> = {}): Reply => ({
   status,
