@@ -3,6 +3,7 @@
 import { resetClient, safeNext } from "@/lib/session";
 
 import { AuthFrame, Notice, primaryButton } from "../AuthFrame";
+import { DemoSignIn } from "./DemoSignIn";
 
 // Keyed by the callback's error code; the parameter's own text never reaches the page. No copy says whether an account exists.
 const ERRORS: Record<string, { title: string; note: string }> = {
@@ -28,6 +29,7 @@ export function LoginView({ error, next }: { error: string | null; next: string 
       <a href={href} onClick={begin} className={primaryButton}>
         Continue with Google
       </a>
+      <DemoSignIn />
     </AuthFrame>
   );
 }
