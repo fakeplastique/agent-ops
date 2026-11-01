@@ -58,3 +58,22 @@ test("the decisions list opens a detail whose tabs are reachable by keyboard", a
   await page.getByRole("tab", { name: "Discussion" }).click();
   await expect(page.getByText(/No messages yet/)).toBeVisible();
 });
+
+// Review A2: at 375 px the list and the pane never show together; a key press must not decide what nobody opened.
+test("on the phone, A and R with the list showing decide nothing; after opening the request A decides it", async ({ page }, info) => {
+  test.skip(info.project.name !== "narrow-375", "list and pane share the screen only below 1024 px");
+  const state = await fakeApp(page);
+  await page.goto("/inbox");
+  const row = page.getByRole("button", { name: new RegExp(TITLE_A) });
+  await row.focus();
+  await page.keyboard.press("a");
+  await page.keyboard.press("r");
+  await expect(page.getByRole("button", { name: "Approve" })).toBeHidden(); // pane is not on screen
+  expect(state.decideCalls).toBe(0);
+  await row.click();
+  await expect(page.getByRole("button", { name: "Approve" })).toBeVisible();
+  await page.getByRole("button", { name: /← Inbox/ }).focus();
+  await page.keyboard.press("a");
+  await expect(page.getByText(/You approved this/)).toBeVisible();
+  expect(state.decideCalls).toBe(1);
+});

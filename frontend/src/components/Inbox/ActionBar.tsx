@@ -11,7 +11,8 @@ import { useNow } from "@/lib/useNow";
 
 import type { Bundle } from "@/components/Decision/model";
 
-type Verdict = "approve" | "reject";
+export type Verdict = "approve" | "reject";
+export type Decided = { decision: Verdict; at: number; nextLevel: boolean };
 type Phase =
   | { kind: "idle" }
   | { kind: "sending"; decision: Verdict }
@@ -55,7 +56,7 @@ export function ActionBar({
   /** Omit both where the keyboard shortcuts are not offered (the detail screen). */
   shortcuts?: boolean;
   onToggleShortcuts?: () => void;
-  onDecided: () => void;
+  onDecided: (done: Decided) => void;
   reload: () => void;
 }) {
   const id = useId();
@@ -116,8 +117,9 @@ export function ActionBar({
     setPhase({ kind: "sending", decision: decisionKind });
     try {
       const out = await decideStep(step.id, { request_version: step.request_version, decision: decisionKind, comment }, attempt.current.key);
-      setPhase({ kind: "done", decision: decisionKind, at: Date.now(), nextLevel: out.next_step_id !== null });
-      onDecided();
+      const done = { decision: decisionKind, at: Date.now(), nextLevel: out.next_step_id !== null };
+      setPhase({ kind: "done", ...done });
+      onDecided(done);
     } catch (e) {
       const next = failure(e);
       setPhase(next);
@@ -195,7 +197,7 @@ export function ActionBar({
       <p id={`${id}-hint`} className="col-span-full m-0 flex flex-wrap items-center gap-x-2 text-small text-muted">
         <span>
           You decide level {step.level} only.
-          {onToggleShortcuts && (shortcuts ? " Shortcuts: A approves, R rejects." : " Shortcuts are off.")}
+          {onToggleShortcuts && (shortcuts ? ` Shortcuts: A approves, R rejects “${step.title}”.` : " Shortcuts are off.")}
         </span>
         {onToggleShortcuts && (
           <button type="button" onClick={onToggleShortcuts} className="text-text underline underline-offset-2">

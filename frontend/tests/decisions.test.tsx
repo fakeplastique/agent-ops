@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -6,7 +6,7 @@ import { DecisionDetail } from "@/components/Decision/DecisionDetail";
 import { DecisionsList } from "@/components/Decision/DecisionsList";
 import { PayloadBlock } from "@/components/Decision/PayloadBlock";
 
-import { decision, failure, iso, page, pending, renderInApp, serve, step, stepsPage, vote, votesPage } from "./helpers";
+import { decision, failure, iso, json, page, pending, renderInApp, serve, step, stepsPage, vote, votesPage } from "./helpers";
 
 vi.mock("@/lib/api/navigate", () => ({ goTo: vi.fn() }));
 vi.mock("next/navigation", () => ({ usePathname: () => "/decisions" }));
@@ -234,5 +234,51 @@ describe("Overview tab", () => {
   it("a small payload is not marked truncated", () => {
     render(<PayloadBlock payload={{ a: 1 }} />);
     expect(screen.queryByText(/Truncated/)).not.toBeInTheDocument();
+  });
+});
+
+describe("Review fixes", () => {
+  // catches: "No decisions yet" for a page past the end of a list that has decisions (A5)
+  it("a skip past the end says the page is out of range and links back to page 1", async () => {
+    const user = userEvent.setup();
+    serve({ "GET /agents": AGENTS, "GET /decision-requests": page([], { total: 12, skip: 200 }) });
+    const onParams = vi.fn();
+    renderInApp(<DecisionsList params={new URLSearchParams("skip=200&status=approved")} onParams={onParams} />);
+    expect(await screen.findByText("That page is out of range")).toBeInTheDocument();
+    expect(screen.queryByText(/No decisions yet/)).not.toBeInTheDocument();
+    expect(screen.queryByText("No decisions match")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Go to the first page" }));
+    expect(Object.fromEntries(onParams.mock.calls.at(-1)![0])).toEqual({ status: "approved" });
+  });
+
+  // catches: the confirmation disappearing with the bar once the step leaves the pending list (A4)
+  it("the detail keeps 'You approved this' after the decision bar goes away", async () => {
+    const user = userEvent.setup();
+    let decided = false;
+    serve(detailRoutes({
+      "GET /me/pending-approvals": () => json(200, page(decided ? [] : [pending()])),
+      "POST /approval-steps/st1/decide": () => { decided = true; return json(200, { step_id: "st1", status: "approved", request_status: "approved", next_step_id: null }); },
+    }));
+    renderInApp(<DecisionDetail id="d1" tab="overview" onTab={vi.fn()} />);
+    await user.click(await screen.findByRole("button", { name: "Approve" }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Approve" })).not.toBeInTheDocument());
+    expect(screen.getByText(/You approved this/)).toBeInTheDocument();
+  });
+
+  it("Reload on the detail re-reads the steps the viewer may decide, so the new version's bar appears", async () => {
+    const user = userEvent.setup();
+    let revised = false;
+    serve(detailRoutes({
+      "GET /me/pending-approvals": () => json(200, page([revised ? pending({ id: "st1b", request_version: 2 }) : pending()])),
+      "GET /decision-requests/d1": () => json(200, decision({ version: revised ? 2 : 1 })),
+      "GET /decision-requests/d1/steps": () => json(200, stepsPage([revised ? step(1, "pending", { id: "st1b", request_version: 2 }) : step(1)])),
+      "POST /approval-steps/st1/decide": () => { revised = true; return failure(409, "stale_version"); },
+    }));
+    renderInApp(<DecisionDetail id="d1" tab="overview" onTab={vi.fn()} />);
+    await user.click(await screen.findByRole("button", { name: "Approve" }));
+    expect(await screen.findByText("This request changed")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Reload" }));
+    await waitFor(() => expect(screen.queryByText("This request changed")).not.toBeInTheDocument());
+    expect(await screen.findByRole("button", { name: "Approve" })).toBeEnabled();
   });
 });

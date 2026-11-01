@@ -131,7 +131,17 @@ export function DecisionsList({ params, onParams }: { params: URLSearchParams; o
         label="Decisions"
         isEmpty={(p) => p.items.length === 0}
         empty={
-          filtered ? (
+          skip > 0 ? (
+            // A link or a stale bookmark past the last page: the list is not empty, the page is.
+            <EmptyState
+              message="That page is out of range"
+              action={
+                <button type="button" onClick={() => onParams(withParams(params, { skip: "" }))} className={`${control} font-medium hover:bg-raised`}>
+                  Go to the first page
+                </button>
+              }
+            />
+          ) : filtered ? (
             <EmptyState
               message="No decisions match"
               action={

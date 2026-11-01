@@ -16,6 +16,8 @@ import { useNow } from "@/lib/useNow";
 import { Pane } from "./Pane";
 
 const SHORTCUTS = "aop.shortcuts";
+// Tailwind lg: where list and pane show side by side.
+const WIDE = "(min-width: 64rem)";
 const TONE = { normal: "text-muted", warning: "font-semibold text-warning", overdue: "font-semibold text-negative" } as const;
 
 // A preference only; a blocked store just means the default (on).
@@ -34,6 +36,7 @@ function Row({ step, current, agent, now, onOpen }: { step: PendingStep; current
       <button
         type="button"
         data-row
+        data-step={step.id}
         aria-current={current}
         onClick={onOpen}
         className="block w-full border-0 border-b border-rule bg-transparent px-4 py-3 text-left hover:bg-raised aria-[current=true]:bg-active max-lg:min-h-16 lg:pl-3"
@@ -70,6 +73,7 @@ export function Inbox() {
   const [chosen, setChosen] = useState<PendingStep | null>(null);
   const [view, setView] = useState<"list" | "pane">("list");
   const [shortcuts, setShortcuts] = useState(readPref);
+  const [note, setNote] = useState<string | null>(null);
   const root = useRef<HTMLDivElement>(null);
   const back = useRef<HTMLButtonElement>(null);
 
@@ -77,7 +81,9 @@ export function Inbox() {
   // The first step opens by default (wide screens show list and pane together) and then stays: a decided step must not
   // be swapped for the next one under the user's eyes.
   if (chosen === null && items[0]) setChosen(items[0]);
-  const open = chosen;
+  // The same request's step as the list has it now: a revised request brings a new step (and version), which replaces
+  // the stale one. A step that left the list (decided) stays as the snapshot, so its confirmation is not swapped away.
+  const open = (chosen && items.find((i) => i.decision_request_id === chosen.decision_request_id)) || chosen;
 
   useEffect(() => {
     if (view === "pane") back.current?.focus();
@@ -91,7 +97,8 @@ export function Inbox() {
     } catch {}
   };
 
-  // Arrow keys move focus between rows; A and R press the pane's own buttons, so they obey the same disabled rules.
+  // Arrow keys move focus AND open the row, so what has focus is what is open. A and R press the pane's own buttons (same
+  // disabled rules) and only when that pane is on screen and shows the focused request.
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     const t = e.target as HTMLElement;
     if (e.ctrlKey || e.metaKey || e.altKey) return;
@@ -100,15 +107,29 @@ export function Inbox() {
       const i = rows.indexOf(t);
       if (i < 0) return;
       e.preventDefault();
-      rows[Math.min(Math.max(i + (e.key === "ArrowDown" ? 1 : -1), 0), rows.length - 1)]?.focus();
+      const next = Math.min(Math.max(i + (e.key === "ArrowDown" ? 1 : -1), 0), rows.length - 1);
+      rows[next]?.focus();
+      const step = items.find((s) => s.id === rows[next]?.dataset.step);
+      if (step) setChosen(step);
+      setNote(null);
       return;
     }
     if (!shortcuts || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable) return;
     const key = e.key.toLowerCase();
     if (key !== "a" && key !== "r") return;
+    // A narrow screen shows the list or the pane, never both: with the list showing, nothing was opened to decide.
+    const wide = window.matchMedia?.(WIDE).matches ?? true;
+    if (!wide && view !== "pane") return;
+    const row = t.closest<HTMLElement>("[data-row]");
+    if (row && row.dataset.step !== open?.id) {
+      const title = items.find((s) => s.id === row.dataset.step)?.title ?? "this request";
+      setNote(`Open “${title}” first (Enter), then use A or R.`);
+      return;
+    }
     const action = root.current?.querySelector<HTMLButtonElement>(`[data-action=${key === "a" ? "approve" : "reject"}]`);
     if (!action) return;
     e.preventDefault();
+    setNote(null);
     // Reject without a reason cannot be sent: take the user to the comment instead.
     if (key === "r" && action.disabled) root.current?.querySelector<HTMLTextAreaElement>("textarea")?.focus();
     else action.click();
@@ -136,6 +157,9 @@ export function Inbox() {
           )}
         </div>
         {headline && <p className="m-0 mt-1 text-muted">{headline}</p>}
+        <p role="status" aria-label="Shortcut" className="m-0 mt-1 text-small text-muted empty:hidden">
+          {note}
+        </p>
       </div>
 
       <div className="grid min-h-0 gap-0 lg:grid-cols-[22rem_minmax(0,1fr)] lg:rounded-card lg:border lg:border-border">
@@ -169,6 +193,7 @@ export function Inbox() {
                     now={now}
                     onOpen={() => {
                       setChosen(s);
+                      setNote(null);
                       setView("pane");
                     }}
                   />
@@ -195,6 +220,10 @@ export function Inbox() {
               shortcuts={shortcuts}
               onToggleShortcuts={toggleShortcuts}
               onDecided={() => {
+                refreshInbox();
+                void list.refetch();
+              }}
+              onReload={() => {
                 refreshInbox();
                 void list.refetch();
               }}

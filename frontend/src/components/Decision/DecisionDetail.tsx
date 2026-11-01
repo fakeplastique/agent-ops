@@ -1,10 +1,11 @@
 "use client";
 
 import Link from "next/link";
+import { useState } from "react";
 
 import { Notice } from "@/app/(auth)/AuthFrame";
 import { DecisionRail } from "@/components/DecisionRail/DecisionRail";
-import { ActionBar } from "@/components/Inbox/ActionBar";
+import { ActionBar, type Decided } from "@/components/Inbox/ActionBar";
 import { ReadView } from "@/components/states/States";
 import { useApp } from "@/components/shell/AppShell";
 import type { Page, PendingStep } from "@/lib/api/types";
@@ -42,6 +43,8 @@ export function DecisionDetail({ id, tab, onTab }: { id: string; tab: string; on
   const agents = useAgentNames();
   const { refreshInbox } = useApp();
   const now = useNow();
+  // Kept here: the bar unmounts once the step leaves the pending list, and the confirmation must not go with it.
+  const [done, setDone] = useState<Decided | null>(null);
 
   return (
     <ReadView read={read} label="Decision" role="member">
@@ -96,19 +99,34 @@ export function DecisionDetail({ id, tab, onTab }: { id: string; tab: string; on
                 </button>
               </Notice>
             )}
-            {mine && (
+            {(mine || done) && (
               <div className="sticky bottom-0 -mx-4 -mb-4 sm:-mx-6 sm:-mb-6">
-                <ActionBar
-                  key={mine.id}
-                  bundle={b}
-                  step={mine}
-                  onDecided={() => {
-                    refreshInbox();
-                    void mySteps.refetch();
-                    void read.refetch();
-                  }}
-                  reload={() => void read.refetch()}
-                />
+                {mine && !done ? (
+                  <ActionBar
+                    key={mine.id}
+                    bundle={b}
+                    step={mine}
+                    onDecided={(d) => {
+                      setDone(d);
+                      refreshInbox();
+                      void mySteps.refetch();
+                      void read.refetch();
+                    }}
+                    reload={() => {
+                      void read.refetch();
+                      void mySteps.refetch();
+                    }}
+                  />
+                ) : (
+                  done && (
+                    <div className="border-t border-border bg-surface px-4 py-3 sm:px-6">
+                      <p className="m-0" role="status">
+                        You {done.decision === "approve" ? "approved" : "rejected"} this at {clockTime(done.at, done.at)}.
+                        {done.decision === "approve" && done.nextLevel ? " The next level now has to decide it." : ""}
+                      </p>
+                    </div>
+                  )
+                )}
               </div>
             )}
           </div>

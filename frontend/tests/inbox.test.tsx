@@ -258,3 +258,92 @@ describe("Inbox decide", () => {
     expect(within(alert).getByText(/can't decide this step/i)).toBeInTheDocument();
   });
 });
+
+// Review A1-A4: stale reload, shortcuts that act only on what is open and visible, and the target named.
+describe("Inbox review fixes", () => {
+  const ok = { step_id: "st1", status: "approved", request_status: "approved", next_step_id: null };
+  const three = page([
+    pending({ id: "st1", decision_request_id: "d1", title: "First request" }),
+    pending({ id: "st2", decision_request_id: "d2", title: "Second request" }),
+    pending({ id: "st3", decision_request_id: "d3", title: "Third request" }),
+  ]);
+  const threeRoutes = (over: Record<string, unknown> = {}) => {
+    const r: Record<string, unknown> = { "GET /agents": AGENTS, "GET /me/pending-approvals": three, ...over };
+    for (const n of [1, 2, 3]) {
+      r[`GET /decision-requests/d${n}`] = decision({ id: `d${n}`, title: `${["", "First", "Second", "Third"][n]} request` });
+      r[`GET /decision-requests/d${n}/votes`] = votesPage([vote("approve")]);
+      r[`GET /decision-requests/d${n}/steps`] = stepsPage([step(1, "pending", { id: `st${n}` })]);
+      r[`POST /approval-steps/st${n}/decide`] = { ...ok, step_id: `st${n}` };
+    }
+    return { ...r, ...over };
+  };
+
+  // catches: focus row 3, press A, row 1 approved (A3)
+  it("arrow keys open the row they move to, so A decides the row that has focus", async () => {
+    const user = userEvent.setup();
+    const s = serve(threeRoutes());
+    renderInApp(<Inbox />);
+    const rows = await screen.findAllByRole("button", { name: /request/ });
+    rows[0].focus();
+    await user.keyboard("{ArrowDown}{ArrowDown}");
+    expect(rows[2]).toHaveFocus();
+    expect(rows[2]).toHaveAttribute("aria-current", "true");
+    await screen.findByRole("heading", { level: 2, name: "Third request" });
+    await user.keyboard("a");
+    await waitFor(() => expect(s.count("POST /approval-steps/st3/decide")).toBe(1));
+    expect(s.count("POST /approval-steps/st1/decide")).toBe(0);
+  });
+
+  it("a row that has focus but is not open never lets A act on the open one, and says to open it first", async () => {
+    const user = userEvent.setup();
+    const s = serve(threeRoutes());
+    renderInApp(<Inbox />);
+    const rows = await screen.findAllByRole("button", { name: /request/ });
+    await screen.findByRole("button", { name: "Approve" }); // row 1 is open
+    rows[2].focus(); // Tab-style focus: nothing was opened
+    await user.keyboard("a");
+    expect(s.calls.filter(([m]) => m === "POST")).toHaveLength(0);
+    expect(screen.getByRole("status", { name: "Shortcut" })).toHaveTextContent(/Open “Third request” first/);
+  });
+
+  // catches: an approval from a pane nobody can see (A2)
+  it("on a narrow screen with the list showing, A and R do nothing", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal("matchMedia", (q: string) => ({ matches: false, media: q, addEventListener() {}, removeEventListener() {} }));
+    const s = serve(threeRoutes());
+    renderInApp(<Inbox />);
+    const rows = await screen.findAllByRole("button", { name: /request/ });
+    await screen.findByRole("button", { name: "Approve" }); // mounted, but hidden by CSS at this width
+    rows[0].focus();
+    await user.keyboard("a");
+    expect(s.calls.filter(([m]) => m === "POST")).toHaveLength(0);
+    await user.click(rows[0]); // opening the request shows the pane
+    await user.keyboard("a");
+    await waitFor(() => expect(s.count("POST /approval-steps/st1/decide")).toBe(1));
+  });
+
+  it("the shortcut hint names the request it would decide", async () => {
+    serve(threeRoutes());
+    renderInApp(<Inbox />);
+    expect(await screen.findByText(/Shortcuts: A approves, R rejects “First request”/)).toBeInTheDocument();
+  });
+
+  // catches: a Reload that cannot clear the notice because the step stays a snapshot of the old version (A1)
+  it("Reload re-reads the inbox so a newer version replaces the stale step and the notice clears", async () => {
+    const user = userEvent.setup();
+    let revised = false;
+    serve(base({
+      "GET /me/pending-approvals": () => json(200, page([revised ? pending({ id: "st1b", request_version: 2 }) : pending()])),
+      "GET /decision-requests/d1": () => json(200, decision({ version: revised ? 2 : 1 })),
+      "GET /decision-requests/d1/steps": () => json(200, stepsPage([revised ? step(1, "pending", { id: "st1b", request_version: 2 }) : step(1)])),
+      "POST /approval-steps/st1/decide": () => { revised = true; return failure(409, "stale_version"); },
+    }));
+    renderInApp(<Inbox />);
+    await openFirst();
+    await user.click(await screen.findByRole("button", { name: "Approve" }));
+    expect(await screen.findByText("This request changed")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Reload" }));
+    await waitFor(() => expect(screen.queryByText("This request changed")).not.toBeInTheDocument());
+    expect(await screen.findByRole("button", { name: "Approve" })).toBeEnabled();
+  });
+});

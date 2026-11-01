@@ -20,12 +20,15 @@ export function Pane({
   shortcuts,
   onToggleShortcuts,
   onDecided,
+  onReload,
 }: {
   step: PendingStep;
   agentName: string;
   shortcuts: boolean;
   onToggleShortcuts: () => void;
   onDecided: () => void;
+  /** The step may be out of date: the caller re-reads the list it came from. */
+  onReload: () => void;
 }) {
   const read = useDecisionBundle(step.decision_request_id);
   const now = useNow();
@@ -78,7 +81,10 @@ export function Pane({
                 shortcuts={shortcuts}
                 onToggleShortcuts={onToggleShortcuts}
                 onDecided={onDecided}
-                reload={() => void read.refetch()}
+                reload={() => {
+                  void read.refetch();
+                  onReload();
+                }}
               />
             </div>
           </div>
