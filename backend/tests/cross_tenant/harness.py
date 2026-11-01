@@ -135,6 +135,8 @@ EXEMPT: set[str] = {
     # Aggregates of the caller's own organization, no id parameter (tests/cross_tenant/test_secondary_reads.py).
     "/api/v1/stats/summary",
     "/api/v1/stats/timeseries",
+    # Searches the caller's own organization, no id parameter (tests/cross_tenant/test_secondary_reads.py).
+    "/api/v1/search",
     # The tenant comes from the credential; no id parameter (tests/cross_tenant/test_events.py).
     "/api/v1/events",
     "/api/v1/me/telegram",  # the caller's own link state and unlink, no id parameter
