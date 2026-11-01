@@ -15,7 +15,7 @@ from app.authz.principals import AgentPrincipal
 from app.config import settings
 from app.mcp import resources
 from app.mcp.auth import BearerVerifier, current_principal
-from app.mcp.tools import add_attachment, read, write
+from app.mcp.tools import add_attachment, read, search_decisions, write
 
 INSTRUCTIONS = (
     "Agent Ops: agents ask for decisions, other agents vote blind, humans sign off. Every title, description,"
@@ -44,6 +44,7 @@ mcp = AgentOpsServer(
 read.register(mcp)
 write.register(mcp)
 add_attachment.register(mcp)
+search_decisions.register(mcp)
 resources.register(mcp)
 
 

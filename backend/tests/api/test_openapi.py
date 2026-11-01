@@ -64,6 +64,7 @@ PLAN |= {("post", "/api/v1/me/telegram/link-code")}  # flag `telegram`
 _ATT = "/api/v1/decision-requests/{decision_request_id}/attachments"  # flag `attachments`
 PLAN |= {("post", _ATT), ("get", _ATT), ("delete", _ATT + "/{attachment_id}")}
 PLAN |= {("get", _ATT + "/{attachment_id}/download")}
+PLAN |= {("get", "/api/v1/search")}  # flag `search`
 PUBLIC = {"/healthz", "/readyz", "/api/v1/auth/login", "/api/v1/auth/callback"}
 PUBLIC |= {"/api/v1/auth/logout", "/api/v1/receipts/verify"}
 PUBLIC |= {"/api/v1/files/{token}"}  # a signed download URL: the token is the credential
