@@ -74,6 +74,36 @@ describe("TokenDialog (agents)", () => {
     expect(document.body.innerHTML).not.toContain("aop_rotated-2");
   });
 
+  it("Escape does not close it: only 'I have saved it' does", async () => {
+    const user = userEvent.setup();
+    mockApi({ ...agentRoutes([agent({})]), "POST /agents/a1/rotate": { body: { id: "a1", token: "aop_rotated-2" } } });
+    render(<AgentsView />);
+    await user.click(await screen.findByRole("button", { name: "Rotate token" }));
+    await user.click(screen.getByRole("button", { name: "Rotate" }));
+    await screen.findByLabelText("Token");
+    await user.keyboard("{Escape}");
+    expect(screen.getByLabelText("Token")).toHaveValue("aop_rotated-2");
+  });
+
+  it("a second secret opens fresh: 'Copied.' from the first does not carry over", async () => {
+    const user = userEvent.setup();
+    Object.defineProperty(navigator, "clipboard", { value: { writeText: vi.fn(() => Promise.resolve()) }, configurable: true });
+    let n = 0;
+    mockApi({ ...agentRoutes([agent({})]), "POST /agents/a1/rotate": () => ({ body: { id: "a1", token: `aop_rotated-${++n}` } }) });
+    render(<AgentsView />);
+    for (const round of [1, 2]) {
+      await user.click(await screen.findByRole("button", { name: "Rotate token" }));
+      await user.click(screen.getByRole("button", { name: "Rotate" }));
+      const dialog = await screen.findByRole("dialog");
+      expect(within(dialog).getByLabelText("Token")).toHaveValue(`aop_rotated-${round}`);
+      expect(within(dialog).queryByText("Copied.")).not.toBeInTheDocument();
+      if (round === 1) await user.click(within(dialog).getByRole("button", { name: "Copy" }));
+      if (round === 1) await within(dialog).findByText("Copied.");
+      await user.click(within(dialog).getByRole("button", { name: "I have saved it" }));
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    }
+  });
+
   it("a stray click outside does not discard the token", async () => {
     const user = userEvent.setup();
     mockApi({ ...agentRoutes([agent({})]), "POST /agents/a1/rotate": { body: { id: "a1", token: "aop_rotated-2" } } });
@@ -122,6 +152,15 @@ describe("Agents", () => {
     await user.click(screen.getByRole("button", { name: "Revoke agent" }));
     expect(await screen.findByText("Revoked")).toBeInTheDocument();
     expect(api.count("DELETE /agents/a1")).toBe(1);
+  });
+
+  it("cancelling a confirm returns focus to the button that asked", async () => {
+    const user = userEvent.setup();
+    mockApi(agentRoutes([agent({})]));
+    render(<AgentsView />);
+    await user.click(await screen.findByRole("button", { name: "Revoke" }));
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.getByRole("button", { name: "Revoke" })).toHaveFocus();
   });
 
   it("a failed read is an error with Retry, never an empty list", async () => {

@@ -1,7 +1,7 @@
 "use client";
 
 import * as Dialog from "@radix-ui/react-dialog";
-import { useId, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 
 import { Notice, primaryButton, retryNote, secondaryButton } from "@/app/(auth)/AuthFrame";
 import { Forbidden, ReadView } from "@/components/states/States";
@@ -207,10 +207,24 @@ export function Confirm({
 }) {
   const [asking, setAsking] = useState(false);
   const first = useRef<HTMLButtonElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const restore = useRef(false);
   const cls = tone === "danger" ? dangerButton : secondaryButton;
+  // Back to the trigger after Cancel or a finished action, so keyboard focus is not dropped to the page.
+  useEffect(() => {
+    if (!asking && restore.current) {
+      restore.current = false;
+      trigger.current?.focus();
+    }
+  }, [asking]);
+  const done = () => {
+    restore.current = true;
+    setAsking(false);
+  };
   if (!asking)
     return (
       <button
+        ref={trigger}
         type="button"
         className={cls}
         onClick={() => {
@@ -224,10 +238,10 @@ export function Confirm({
   return (
     <span role="group" aria-label={question} className="flex flex-wrap items-center gap-2">
       <span>{question}</span>
-      <button ref={first} type="button" aria-disabled={busy} className={cls} onClick={() => !busy && void onConfirm()}>
+      <button ref={first} type="button" aria-disabled={busy} className={cls} onClick={() => !busy && void Promise.resolve(onConfirm()).finally(done)}>
         {busy ? "Working…" : confirmLabel}
       </button>
-      <button type="button" className={secondaryButton} onClick={() => setAsking(false)}>
+      <button type="button" className={secondaryButton} onClick={done}>
         Cancel
       </button>
     </span>
@@ -238,24 +252,21 @@ export function Confirm({
  * A secret the API returns once (agent token, webhook secret, invitation link, personal access token).
  * The value lives only in the caller's state: closing clears it and nothing can reopen it.
  */
-export function SecretDialog({
-  title,
-  intro,
-  label,
-  secret,
-  onClose,
-}: {
+export function SecretDialog(props: {
   title: string;
   intro: string;
   label: string;
   secret: string | null;
   onClose: () => void;
 }) {
+  // Keyed on the secret: a second secret starts from a clean dialog (no "Copied." carried over).
+  return props.secret === null ? null : <SecretBody key={props.secret} {...props} secret={props.secret} />;
+}
+
+function SecretBody({ title, intro, label, secret, onClose }: { title: string; intro: string; label: string; secret: string; onClose: () => void }) {
   const [copy, setCopy] = useState<"idle" | "copied" | "failed">("idle");
   const box = useRef<HTMLTextAreaElement>(null);
   const id = useId();
-  if (secret === null) return null;
-
   const copyIt = async () => {
     try {
       await navigator.clipboard.writeText(secret);
@@ -272,9 +283,10 @@ export function SecretDialog({
         <Dialog.Overlay className="fixed inset-0 bg-text/20" />
         <Dialog.Content
           aria-describedby={undefined}
-          // A stray click outside must not throw away a value that can never be shown again.
+          // Outside click and Escape must not throw away a value that can never be shown again.
           onPointerDownOutside={(e) => e.preventDefault()}
           onInteractOutside={(e) => e.preventDefault()}
+          onEscapeKeyDown={(e) => e.preventDefault()}
           className="fixed top-1/2 left-1/2 flex max-h-[calc(100dvh-2rem)] w-[min(32rem,calc(100vw-2rem))] -translate-x-1/2 -translate-y-1/2 flex-col gap-4 overflow-y-auto rounded-card bg-surface p-6 shadow-float"
         >
           <Dialog.Title className="m-0 text-section font-medium">{title}</Dialog.Title>

@@ -119,8 +119,8 @@ const toBody = (d: Draft) => ({
 const small = "inline-flex h-control items-center rounded-control px-3 text-small font-medium text-muted hover:bg-raised hover:text-text max-lg:h-touch";
 
 /**
- * One policy's form. The API takes no version, so before a save the current copy is read again and an edit made
- * on a policy that has since changed is stopped (the window between that read and the write is the residual risk).
+ * One policy's form. A save sends only the changed fields and the updated_at it started from; the API answers 409
+ * stale_version when the policy has moved on, and the current copy is then offered (load it, or keep editing on top of it).
  */
 export function PolicyEditor({
   policy,
@@ -165,10 +165,17 @@ export function PolicyEditor({
     if (hasErrors(errors) || (plan && (planOnly("quorum") || planOnly("rounds") || planOnly("levels")))) return;
     const r = await act.run(async () => {
       if (base) {
-        const fresh = await api<Policy>(`/escalation-policies/${base.id}`);
-        if (fresh.updated_at !== base.updated_at) return fresh;
-        await api(`/escalation-policies/${base.id}`, { method: "PATCH", body: toBody(d) });
-        return null;
+        // Only what this edit changed, against the version it started from: another admin's other fields stay theirs.
+        const now = toBody(d);
+        const was = toBody(JSON.parse(initial) as Draft);
+        const changed = Object.fromEntries(Object.entries(now).filter(([k, v]) => JSON.stringify(v) !== JSON.stringify(was[k as keyof typeof was])));
+        try {
+          await api(`/escalation-policies/${base.id}`, { method: "PATCH", body: { ...changed, if_updated_at: base.updated_at } });
+          return null;
+        } catch (e) {
+          if (e instanceof ApiError && e.code === "stale_version") return api<Policy>(`/escalation-policies/${base.id}`);
+          throw e;
+        }
       }
       await api("/escalation-policies", { method: "POST", body: { ...toBody(d), team_id: d.teamId || null } });
       return null;
@@ -319,7 +326,7 @@ export function PolicyEditor({
           <p className="m-0 text-muted">Someone saved it after you started. Your edits were not saved, so nothing was overwritten.</p>
           <div className="flex flex-wrap gap-2">
             <button type="button" className={primaryButton} onClick={reload}>Load the current version</button>
-            <button type="button" className={secondaryButton} onClick={() => setConflict(null)}>Keep editing</button>
+            <button type="button" className={secondaryButton} onClick={() => { setBase(conflict); setConflict(null); }}>Keep editing</button>
           </div>
         </div>
       )}

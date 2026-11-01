@@ -110,7 +110,7 @@ describe("Policies", () => {
     expect(screen.queryByRole("form")).not.toBeInTheDocument();
     const patches = api.calls.filter((c) => c.key === "PATCH /escalation-policies/p1");
     expect(patches).toHaveLength(1);
-    expect(patches[0].body).toMatchObject({ quorum_size: 2, rounds: 1, risk_floors: { "refund.issue": "high" } });
+    expect(patches[0].body).toEqual({ quorum_size: 2, if_updated_at: "2026-10-01T09:00:00Z" });
   });
 
   it("leaving with unsaved changes asks first: Cancel, a nav link and closing the tab", async () => {
@@ -146,12 +146,12 @@ describe("Policies", () => {
     expect(screen.queryByRole("form")).not.toBeInTheDocument();
   });
 
-  it("saving a stale policy shows the conflict and sends no PATCH", async () => {
+  it("a stale save is answered 409: the conflict is shown, Load takes the current version", async () => {
     const user = userEvent.setup();
     const api = mockApi(
       routes({
         "GET /escalation-policies/p1": policy({ quorum_size: 1, updated_at: "2026-11-03T09:59:00Z" }),
-        "PATCH /escalation-policies/p1": policy(),
+        "PATCH /escalation-policies/p1": err(409, "stale_version", "stale"),
       }),
     );
     render(<PoliciesView />);
@@ -159,10 +159,30 @@ describe("Policies", () => {
     await setNumber(user, within(form).getByLabelText("Reviewers needed"), "2");
     await user.click(within(form).getByRole("button", { name: "Save policy" }));
     expect(await screen.findByText("This policy changed since you opened it")).toBeInTheDocument();
-    expect(api.calls.some((c) => c.key.startsWith("PATCH"))).toBe(false);
-    // Reload replaces the edit with the current version.
+    expect(api.calls.filter((c) => c.key.startsWith("PATCH"))[0].body.if_updated_at).toBe("2026-10-01T09:00:00Z");
     await user.click(screen.getByRole("button", { name: "Load the current version" }));
     expect(within(screen.getByRole("form")).getByLabelText("Reviewers needed")).toHaveValue(1);
+  });
+
+  it("sends only the changed fields with the version it started from, and after Keep editing the newer version", async () => {
+    const user = userEvent.setup();
+    let attempt = 0;
+    const api = mockApi(
+      routes({
+        "GET /escalation-policies/p1": policy({ rounds: 1, updated_at: "2026-11-03T09:59:00Z" }),
+        "PATCH /escalation-policies/p1": () => (++attempt === 1 ? err(409, "stale_version", "stale") : { body: policy() }),
+      }),
+    );
+    render(<PoliciesView />);
+    const form = await edit(user);
+    await setNumber(user, within(form).getByLabelText("Reviewers needed"), "2");
+    await user.click(within(form).getByRole("button", { name: "Save policy" }));
+    await user.click(await screen.findByRole("button", { name: "Keep editing" }));
+    await user.click(screen.getByRole("button", { name: "Save policy" }));
+    await waitFor(() => expect(api.count("PATCH /escalation-policies/p1")).toBe(2));
+    const [first, second] = api.calls.filter((c) => c.key.startsWith("PATCH")).map((c) => c.body);
+    expect(first).toEqual({ quorum_size: 2, if_updated_at: "2026-10-01T09:00:00Z" }); // only the changed field
+    expect(second).toEqual({ quorum_size: 2, if_updated_at: "2026-11-03T09:59:00Z" }); // B4: not the old version again
   });
 
   it("levels: add and remove keep the order; more levels than the plan allows is named inline", async () => {
@@ -310,6 +330,16 @@ describe("Webhooks", () => {
     expect(await screen.findByText("Paused")).toBeInTheDocument();
     expect(api.count("PATCH /webhook-subscriptions/w1")).toBe(1);
     expect(await screen.findByRole("button", { name: "Resume" })).toBeInTheDocument();
+  });
+
+  it("a failed pause does not leak its error into the New webhook form", async () => {
+    const user = userEvent.setup();
+    mockApi(hookRoutes([hook()], { "PATCH /webhook-subscriptions/w1": err(500, "internal", "boom") }));
+    render(<WebhooksView />);
+    await user.click(await screen.findByRole("button", { name: "Pause" }));
+    expect(await screen.findByRole("alert")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "New webhook" }));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("members are forbidden here and no webhook read is made", async () => {

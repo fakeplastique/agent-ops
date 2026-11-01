@@ -82,7 +82,7 @@ function Webhooks() {
   };
 
   const newHook = (
-    <button type="button" className={primaryButton} onClick={() => setCreating(true)}>
+    <button type="button" className={primaryButton} onClick={() => { act.clear(); setCreating(true); }}>
       New webhook
     </button>
   );

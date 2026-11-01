@@ -59,6 +59,8 @@ class PolicyPatch(BaseSchema):
     levels: list[LevelIn] | None = Field(None, min_length=1, max_length=10)
     voting_timeout_minutes: Minutes | None = None
     risk_floors: dict[ActionType, Risk] | None = Field(None, max_length=200)
+    # Optimistic concurrency: the updated_at the editor read; a different current value is a 409.
+    if_updated_at: datetime | None = None
 
 
 class PolicyOut(BaseModel):
@@ -111,16 +113,22 @@ async def get_policy(policy_id: uuid.UUID, actor: ActorDep, engine: EngineDep) -
         return PolicyOut(**await policies.get_policy(s, actor.organization_id, policy_id))
 
 
-@router.patch("/{policy_id}", response_model=PolicyOut, dependencies=[Depends(write_limit)])
+@router.patch(
+    "/{policy_id}",
+    response_model=PolicyOut,
+    dependencies=[Depends(write_limit)],
+    responses=error_responses(409),
+)
 async def update(
     policy_id: uuid.UUID, body: PolicyPatch, admin: AdminDep, engine: EngineDep
 ) -> PolicyOut:
     # An explicit null on a required field is a 422 from the service, never a silent keep.
     fields = body.model_dump(exclude_unset=True)
+    expected = fields.pop("if_updated_at", None)
     async with tenant_session(engine, admin.organization_id) as s:
         return PolicyOut(
             **await policies.update_policy(
-                s, admin.organization_id, admin.user_id, policy_id, fields
+                s, admin.organization_id, admin.user_id, policy_id, fields, expected
             )
         )
 

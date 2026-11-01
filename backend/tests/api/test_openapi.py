@@ -57,6 +57,7 @@ CONFLICT = {
     ("patch", "/api/v1/teams/{team_id}"),
     ("delete", "/api/v1/teams/{team_id}"),
     ("post", "/api/v1/escalation-policies"),
+    ("patch", "/api/v1/escalation-policies/{policy_id}"),
 }
 PLAN = {("post", "/api/v1/decision-requests"), ("post", "/api/v1/escalation-policies")}
 PLAN |= {("get", "/api/v1/stats/summary"), ("get", "/api/v1/stats/timeseries")}  # analytics gate

@@ -12,10 +12,10 @@ import { TokensBlock } from "./TokensBlock";
 type Member = { user_id: string; email: string; full_name: string; role: string };
 
 export function SettingsView() {
-  return <WithSession title="Settings">{(s) => <Settings me={s.user_id} isAdmin={s.role === "org_admin"} />}</WithSession>;
+  return <WithSession title="Settings">{(s) => <Settings me={s.user_id} role={s.role} isAdmin={s.role === "org_admin"} />}</WithSession>;
 }
 
-function Settings({ me, isAdmin }: { me: string; isAdmin: boolean }) {
+function Settings({ me, role, isAdmin }: { me: string; role: string | null; isAdmin: boolean }) {
   const members = useRead<Page<Member>>(`/members?${LIST}`);
   const plan = useRead<Plan>("/organizations/current/plan");
   const demo = useDemoSwitch(isAdmin, () => plan.refetch());
@@ -33,7 +33,7 @@ function Settings({ me, isAdmin }: { me: string; isAdmin: boolean }) {
                     [
                       ["Name", mine?.full_name],
                       ["Email", mine?.email],
-                      ["Role", mine && roleLabel(mine.role)],
+                      ["Role", role ? roleLabel(role) : undefined], // from the session: always the role in use
                     ] as const
                   ).map(([k, v]) => (
                     <div key={k} className="flex flex-wrap items-baseline justify-between gap-2 border-b border-rule py-3">

@@ -171,6 +171,27 @@ async def test_concurrent_patches_keep_both_fields(app_engine, owner_engine):
     assert rows == [(5, 2)]
 
 
+async def test_patch_with_if_updated_at_is_refused_when_the_policy_moved_on(
+    web, app_engine, owner_engine
+):
+    _, admin = await _org(app_engine, owner_engine)
+    made = (await web.client.post(EP, json=GOOD, headers=admin)).json()
+    one = f"{EP}/{made['id']}"
+    first = await web.client.patch(
+        one, json={"quorum_size": 2, "if_updated_at": made["updated_at"]}, headers=admin
+    )
+    assert first.status_code == 200 and first.json()["quorum_size"] == 2
+    # catches: a second admin holding the old copy reverting the first admin's change
+    stale = await web.client.patch(
+        one, json={"rounds": 2, "if_updated_at": made["updated_at"]}, headers=admin
+    )
+    assert stale.status_code == 409 and stale.json()["error"]["code"] == "stale_version"
+    current = (await web.client.get(one, headers=admin)).json()
+    assert current["rounds"] == 1 and current["quorum_size"] == 2
+    # without the token the behaviour is unchanged
+    assert (await web.client.patch(one, json={"quorum_size": 1}, headers=admin)).status_code == 200
+
+
 async def test_after_downgrade_an_admin_can_edit_a_team_policy_down_to_the_plan(
     web, app_engine, owner_engine
 ):

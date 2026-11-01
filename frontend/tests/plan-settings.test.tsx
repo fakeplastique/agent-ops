@@ -99,6 +99,13 @@ describe("Settings", () => {
     expect(screen.getByText("maya@x.io")).toBeInTheDocument();
   });
 
+  it("the role comes from the session, so a user beyond the first 100 members still sees it", async () => {
+    mockApi(settingsRoutes({ "GET /members?limit=100": page([{ ...me, user_id: "someone-else" }], 150) }));
+    render(<SettingsView />);
+    expect(await screen.findByText("org admin")).toBeInTheDocument();
+    expect(screen.getAllByText("—")).toHaveLength(2); // name and email are not in the loaded page
+  });
+
   it("Free shows the Telegram plan gate and makes no Telegram request", async () => {
     const api = mockApi(settingsRoutes({ [PLAN]: free }));
     render(<SettingsView />);
