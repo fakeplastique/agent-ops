@@ -31,6 +31,8 @@ test("the photographs load, the compositions are decoration, the credits link to
   const photos = page.locator(".ln img[src^='/landing/']");
   await expect(photos).toHaveCount(2);
   for (const img of await photos.all()) {
+    // The questions photo is hidden below 1000px by design: a hidden lazy image never loads.
+    if (!(await img.isVisible())) continue;
     await img.scrollIntoViewIfNeeded();
     await expect.poll(() => img.evaluate((el: HTMLImageElement) => el.complete && el.naturalWidth > 0)).toBe(true);
   }
