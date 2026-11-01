@@ -24,7 +24,12 @@ def run_gate(tmp_path: Path, uv_exit: int = 0, curl: str = "stateful") -> int:
         shim = tmp_path / tool
         shim.write_text(f"#!/bin/sh\n{body}\n")
         shim.chmod(0o755)
-    env = {**os.environ, "PATH": f"{tmp_path}:{os.environ['PATH']}", "SKEW_CHECK": "true", "DOCS_CHECK": "true"}
+    env = {
+        **os.environ,
+        "PATH": f"{tmp_path}:{os.environ['PATH']}",
+        "SKEW_CHECK": "true",
+        "DOCS_CHECK": "true",
+    }
     return subprocess.run(["bash", str(GATE)], check=False, env=env, capture_output=True).returncode
 
 

@@ -14,13 +14,19 @@ SCRIPT = REPO / "scripts" / "check_docs.sh"
 
 def check(docs_root: Path) -> subprocess.CompletedProcess[str]:
     env = {**os.environ, "DOCS_ROOT": str(docs_root), "DOCS_PYTHON": sys.executable}
-    return subprocess.run(["bash", str(SCRIPT)], env=env, capture_output=True, text=True, check=False)
+    return subprocess.run(
+        ["bash", str(SCRIPT)], env=env, capture_output=True, text=True, check=False
+    )
 
 
 @pytest.fixture
 def copy(tmp_path: Path) -> Path:
     shutil.copy(REPO / "README.md", tmp_path)
-    shutil.copytree(REPO / "docs", tmp_path / "docs", ignore=shutil.ignore_patterns("plan.md", "spec.md", "design-options"))
+    shutil.copytree(
+        REPO / "docs",
+        tmp_path / "docs",
+        ignore=shutil.ignore_patterns("plan.md", "spec.md", "design-options"),
+    )
     return tmp_path
 
 
