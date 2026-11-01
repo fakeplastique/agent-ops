@@ -80,18 +80,29 @@ def record(c: Client, events: list[dict[str, Any]], now: float) -> bool:
 
 
 async def run_ws(c: Client, origin: str, base: str, after: int) -> None:
-    t = (
-        await call(c, "POST", "/api/v1/realtime/ticket", headers=_hdr(c, origin))
-    ).json()["ticket"]
-    url = base.replace("http", "ws", 1) + f"/ws?ticket={t}&after={after}"
-    async with websockets.connect(url, additional_headers={"Origin": origin}) as ws:
-        async for msg in ws:
-            raw = msg if isinstance(msg, bytes) else msg.encode()
-            c.wire.frames += 1
-            c.wire.bytes += len(raw) + (
-                4 if len(raw) > 125 else 2
-            )  # server frames are unmasked
-            record(c, json.loads(raw)["events"], time.perf_counter())
+    while True:  # a refused or dropped socket (a stream slot not yet free) is retried with a fresh ticket
+        try:
+            r = await call(
+                c, "POST", "/api/v1/realtime/ticket", headers=_hdr(c, origin)
+            )
+            url = (
+                base.replace("http", "ws", 1)
+                + f"/ws?ticket={r.json()['ticket']}&after={after}"
+            )
+            async with websockets.connect(
+                url, additional_headers={"Origin": origin}
+            ) as ws:
+                async for msg in ws:
+                    raw = msg if isinstance(msg, bytes) else msg.encode()
+                    c.wire.frames += 1
+                    c.wire.bytes += len(raw) + (
+                        4 if len(raw) > 125 else 2
+                    )  # server frames are unmasked
+                    frame = json.loads(raw)
+                    record(c, frame["events"], time.perf_counter())
+                    after = frame["after"]
+        except (websockets.WebSocketException, KeyError):
+            await asyncio.sleep(1)
 
 
 async def run_longpoll(c: Client, after: int) -> None:
@@ -99,6 +110,11 @@ async def run_longpoll(c: Client, after: int) -> None:
         r = await call(
             c, "GET", f"/api/v1/events?after={after}&wait=25", headers=_hdr(c)
         )
+        if (
+            r.status_code == 429
+        ):  # the stream cap: a slot of the last trial is not free yet
+            await asyncio.sleep(1)
+            continue
         feed = r.json()
         record(c, feed["events"], time.perf_counter())
         after = feed["after"]
@@ -110,11 +126,12 @@ async def run_adaptive(c: Client, after: int) -> None:
         r = await call(
             c, "GET", f"/api/v1/events?after={after}&wait=0", headers=_hdr(c)
         )
-        feed = r.json()
-        busy = bool(feed["events"])
-        record(c, feed["events"], time.perf_counter())
-        after = feed["after"]
-        gap = ADAPTIVE_MIN if busy else min(gap * 2, ADAPTIVE_MAX)
+        if r.status_code == 200:
+            feed = r.json()
+            busy = bool(feed["events"])
+            record(c, feed["events"], time.perf_counter())
+            after = feed["after"]
+            gap = ADAPTIVE_MIN if busy else min(gap * 2, ADAPTIVE_MAX)
         await asyncio.sleep(gap)
 
 
@@ -163,10 +180,17 @@ async def sign_in(base: str, origin: str, email: str) -> tuple[str, str, str]:
 
 async def head(c: Client) -> int:
     """The organization's current newest seq: every client starts after it, so history is not replayed."""
-    after = 0
+    after, tries = 0, 0
     while True:
         r = await c.http.get(f"/api/v1/events?after={after}&wait=0", headers=_hdr(c))
-        r.raise_for_status()
+        if (
+            r.status_code == 429 and tries < 30
+        ):  # the last trial's streams are still letting go of their slots
+            tries += 1
+            await asyncio.sleep(1)
+            continue
+        if r.status_code != 200:
+            sys.exit(f"event feed refused the head read: {r.status_code} {r.text}")
         feed = r.json()
         if not feed["events"] and feed["after"] == after:
             return after
@@ -367,7 +391,7 @@ async def main(a: argparse.Namespace) -> dict[str, Any]:
                     rng,
                 )
             )
-            await asyncio.sleep(3)  # long-poll slots of the last trial free themselves
+            await asyncio.sleep(6)  # stream slots of the last trial free themselves
     finally:
         for c in [producer, *clients]:
             await c.http.aclose()
