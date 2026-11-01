@@ -109,7 +109,7 @@ function Results({ days }: { days: number }) {
       )}
       <ReadView read={summary} label="Analytics" gate={{ feature: FEATURE, description: DESCRIPTION }}>
         {(s) => (
-          <>
+          <div className="flex flex-col gap-8">
             <dl className="m-0 grid grid-cols-1 border-y border-rule sm:grid-cols-3 sm:divide-x sm:divide-rule">
               <Kpi label="Requests" value={String(s.requests)} />
               <Kpi label="Auto-approval rate" value={s.auto_approval_rate === null ? "—" : `${Math.round(100 * s.auto_approval_rate)}%`} note="Approved without a human step" />
@@ -142,7 +142,7 @@ function Results({ days }: { days: number }) {
                 <BarList label="Votes per agent" rows={s.votes_per_agent.map((a) => ({ label: a.name, value: a.votes }))} />
               )}
             </Section>
-          </>
+          </div>
         )}
       </ReadView>
     </div>

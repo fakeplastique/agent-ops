@@ -6,8 +6,8 @@ export function BarList({ rows, label }: { rows: { label: string; value: number 
   return (
     <ul aria-label={label} className="m-0 flex list-none flex-col gap-2 p-0">
       {rows.map((r) => (
-        <li key={r.label} className="grid grid-cols-[minmax(6rem,10rem)_1fr_3rem] items-center gap-3 max-sm:grid-cols-[minmax(5rem,7rem)_1fr_2.5rem]">
-          <span title={r.label} className="truncate">
+        <li key={r.label} className="grid grid-cols-[minmax(6rem,10rem)_1fr_3rem] items-center gap-3 max-sm:grid-cols-[minmax(5rem,8rem)_1fr_2rem]">
+          <span title={r.label} className="min-w-0 wrap-anywhere">
             {r.label}
           </span>
           <span className="h-2 overflow-hidden rounded-pill bg-raised" aria-hidden="true">
