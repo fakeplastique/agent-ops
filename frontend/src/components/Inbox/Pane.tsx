@@ -69,15 +69,18 @@ export function Pane({
                 </section>
               </div>
             </div>
-            <ActionBar
-              key={step.id}
-              bundle={b}
-              step={step}
-              shortcuts={shortcuts}
-              onToggleShortcuts={onToggleShortcuts}
-              onDecided={onDecided}
-              reload={() => void read.refetch()}
-            />
+            {/* Bleeds to the pane's edges and stays at the bottom of the screen: Approve and Reject are always in reach. */}
+            <div className="sticky bottom-0 -mx-4 -mb-4 sm:-mx-6 sm:-mb-6">
+              <ActionBar
+                key={step.id}
+                bundle={b}
+                step={step}
+                shortcuts={shortcuts}
+                onToggleShortcuts={onToggleShortcuts}
+                onDecided={onDecided}
+                reload={() => void read.refetch()}
+              />
+            </div>
           </div>
         );
       }}

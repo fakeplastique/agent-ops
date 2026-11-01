@@ -9,7 +9,8 @@ test("the inbox lists the step, opens it with the rail, and approving sends exac
   await page.goto("/inbox");
   const row = page.getByRole("button", { name: new RegExp(TITLE_A) });
   await expect(row).toBeVisible();
-  await expect(page.getByRole("link", { name: /Inbox, 1 waiting/ }).first()).toBeAttached();
+  // The nav lives in the menu sheet at 375 px (not rendered until opened); the count is checked where the sidebar shows.
+  if (info.project.name === "wide-1280") await expect(page.getByRole("link", { name: /Inbox, 1 waiting/ })).toBeVisible();
   await page.screenshot({ path: `test-results/inbox-list-${info.project.name}.png`, fullPage: true });
 
   await row.click();
@@ -39,4 +40,21 @@ test("a session that expired sends the user to sign in and back", async ({ page 
   state.user = null;
   await page.goto("/inbox");
   await expect(page).toHaveURL(/\/login\?next=%2Finbox$/);
+});
+
+test("the decisions list opens a detail whose tabs are reachable by keyboard", async ({ page }, info) => {
+  await fakeApp(page);
+  await page.goto("/decisions");
+  await expect(page.getByText("1-1 of 1")).toBeVisible();
+  await page.screenshot({ path: `test-results/decisions-list-${info.project.name}.png`, fullPage: true });
+  await page.getByRole("link", { name: TITLE_A }).click();
+  await expect(page.getByRole("heading", { level: 1, name: TITLE_A })).toBeVisible();
+  await page.screenshot({ path: `test-results/decision-detail-${info.project.name}.png`, fullPage: true });
+  await page.getByRole("tab", { name: "Overview" }).focus();
+  await page.keyboard.press("ArrowRight");
+  await expect(page).toHaveURL(/\?tab=votes$/);
+  await expect(page.getByRole("tabpanel")).toContainText("rationale reject");
+  await page.screenshot({ path: `test-results/decision-votes-${info.project.name}.png`, fullPage: true });
+  await page.getByRole("tab", { name: "Discussion" }).click();
+  await expect(page.getByText(/No messages yet/)).toBeVisible();
 });

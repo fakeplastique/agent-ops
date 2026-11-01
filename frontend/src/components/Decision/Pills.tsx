@@ -23,12 +23,12 @@ export function RiskPill({ risk }: { risk: Risk }) {
 }
 
 const STATUS: Record<Status, { label: string; tone: string; glyph: string }> = {
-  pending_votes: { label: "Voting", tone: "bg-pill-neutral-bg text-pill-neutral-ink", glyph: "M8 4v4l2.5 1.5" },
+  pending_votes: { label: "Voting", tone: "bg-pill-neutral-bg text-pill-neutral-ink", glyph: "M8 2.5a5.5 5.5 0 100 11 5.5 5.5 0 000-11zM8 5v3l2 1.5" },
   pending_discussion: { label: "Discussion", tone: "bg-pill-neutral-bg text-pill-neutral-ink", glyph: "M3.5 4.5h9v5h-5l-2.5 2v-2h-1.5z" },
-  pending_approval: { label: "Waiting for approval", tone: "bg-pill-warning-bg text-pill-warning-ink", glyph: "M8 4v4l2.5 1.5" },
+  pending_approval: { label: "Waiting for approval", tone: "bg-pill-warning-bg text-pill-warning-ink", glyph: "M8 2.5a5.5 5.5 0 100 11 5.5 5.5 0 000-11zM8 5v3l2 1.5" },
   approved: { label: "Approved", tone: "bg-pill-positive-bg text-pill-positive-ink", glyph: "M4.5 8.5l2.5 2.5 4.5-5" },
   rejected: { label: "Rejected", tone: "bg-pill-negative-bg text-pill-negative-ink", glyph: "M5 5l6 6M11 5l-6 6" },
-  expired: { label: "Expired", tone: "bg-pill-neutral-bg text-pill-neutral-ink", glyph: "M8 4v4l2.5 1.5" },
+  expired: { label: "Expired", tone: "bg-pill-neutral-bg text-pill-neutral-ink", glyph: "M8 2.5a5.5 5.5 0 100 11 5.5 5.5 0 000-11zM8 5v3l2 1.5" },
   cancelled: { label: "Withdrawn", tone: "bg-pill-neutral-bg text-pill-neutral-ink", glyph: "M4.5 8h7" },
 };
 

@@ -74,7 +74,7 @@ export function ActionBar({
   // Before `closed`: the re-read after our own decision must not replace the confirmation.
   if (phase.kind === "done")
     return (
-      <div className="border-t border-border bg-surface px-6 py-3 max-lg:px-4">
+      <div className="border-t border-border bg-surface px-4 py-3 sm:px-6">
         <p className="m-0" role="status">
           You {phase.decision === "approve" ? "approved" : "rejected"} this at {clockTime(phase.at, phase.at)}.
           {phase.decision === "approve" && phase.nextLevel ? " The next level now has to decide it." : ""}
@@ -84,7 +84,7 @@ export function ActionBar({
 
   if (stale || phase.kind === "stale")
     return (
-      <div className="border-t border-border bg-surface px-6 py-3 max-lg:px-4">
+      <div className="border-t border-border bg-surface px-4 py-3 sm:px-6">
         <Notice title="This request changed">
           The agent revised it, so earlier votes and steps no longer apply.{" "}
           <button type="button" onClick={reload} className="text-text underline underline-offset-2">
@@ -96,7 +96,7 @@ export function ActionBar({
 
   if (closed || phase.kind === "conflict")
     return (
-      <div className="border-t border-border bg-surface px-6 py-3 max-lg:px-4">
+      <div className="border-t border-border bg-surface px-4 py-3 sm:px-6">
         <p className="m-0" role="status">
           {phase.kind === "conflict" ? "This step was already decided. " : "This step is no longer waiting. "}
           {mine?.decided_by ? `Decided by ${mine.decided_by}${mine.decided_at ? ` at ${clockTime(mine.decided_at, now)}` : ""}.` : "The progress above shows where it stands."}
@@ -128,7 +128,7 @@ export function ActionBar({
   }
 
   return (
-    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-end gap-x-4 gap-y-2 border-t border-border bg-surface px-6 pt-3 pb-3.5 max-lg:sticky max-lg:bottom-0 max-lg:grid-cols-1 max-lg:px-4">
+    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-end gap-x-4 gap-y-2 border-t border-border bg-surface px-4 pt-3 pb-3.5 sm:px-6 max-lg:grid-cols-1">
       <label htmlFor={`${id}-c`} className="col-span-full flex flex-wrap justify-between gap-x-2 font-medium max-lg:text-body">
         Comment
         <span className="font-normal text-muted">Required to reject. The agent sees it.</span>

@@ -39,6 +39,14 @@ export async function fakeApp(page: Page, opts: { user?: string; org?: string } 
       }];
       return route.fulfill({ json: list(open) });
     }
+    if (path === "/decision-requests")
+      return route.fulfill({ json: list([{
+        id: `d-${state.org}`, title: titleOf(), description: "", action_type: "payments.refund", payload: {}, risk_level: "high",
+        effective_risk_level: "high", status: "pending_approval", version: 1, content_hash: "h", requested_by_agent_id: "ag1",
+        requested_by_user_id: null, voting_deadline_at: mins(-20), escalation_reason: null, decided_at: null, created_at: mins(-30), updated_at: mins(-1),
+      }], { total: 1 }) });
+    if (path.endsWith("/messages")) return route.fulfill({ json: list([]) });
+    if (path === "/audit-logs") return route.fulfill({ json: list([]) });
     if (path === `/decision-requests/d-${state.org}`)
       return route.fulfill({ json: {
         id: `d-${state.org}`, title: titleOf(), description: "Customer reports damage", action_type: "payments.refund",

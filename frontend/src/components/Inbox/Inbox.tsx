@@ -178,7 +178,7 @@ export function Inbox() {
           </ReadView>
         </div>
 
-        <div className={`${view === "list" ? "max-lg:hidden" : ""} flex min-w-0 flex-col p-4 lg:p-6`}>
+        <div className={`${view === "list" ? "max-lg:hidden" : ""} flex min-w-0 flex-col lg:p-6`}>
           <button
             ref={back}
             type="button"

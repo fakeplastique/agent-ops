@@ -97,7 +97,7 @@ export function DecisionDetail({ id, tab, onTab }: { id: string; tab: string; on
               </Notice>
             )}
             {mine && (
-              <div className="-mx-4 -mb-4 max-lg:sticky max-lg:bottom-0 sm:-mx-6 sm:-mb-6">
+              <div className="sticky bottom-0 -mx-4 -mb-4 sm:-mx-6 sm:-mb-6">
                 <ActionBar
                   key={mine.id}
                   bundle={b}
