@@ -7,7 +7,7 @@ from datetime import timedelta
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-from app.db.session import tenant_session
+from app.db.session import lookup_as, tenant_session
 from app.domain.errors import NotFoundError
 from app.ports.clock import Clock
 
@@ -155,3 +155,18 @@ async def select_organization(
         await conn.execute(_SET_HASH, {"h": _hash(raw)})
         await conn.execute(_SELECT_ORG, {"o": organization_id})
     return role
+
+
+_MINE = text(
+    "select o.id, o.name, m.role from memberships m join organizations o on o.id = m.organization_id"
+    " where m.user_id = :u order by o.name, o.id"
+)
+
+
+async def organizations_of(engine: AsyncEngine, user_id: uuid.UUID) -> list[dict[str, str]]:
+    """The caller's own organizations and roles, for the switcher. No tenant is selected: the self policies show
+    exactly the memberships (and their organizations) of the user named by `app.self_user_id`."""
+    async with engine.begin() as conn:
+        await lookup_as(conn, "app.self_user_id", str(user_id))
+        rows = (await conn.execute(_MINE, {"u": user_id})).all()
+    return [{"id": str(r.id), "name": r.name, "role": r.role} for r in rows]

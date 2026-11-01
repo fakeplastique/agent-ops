@@ -14,7 +14,7 @@ function view(read: Partial<Read<Rows>>, extra: Partial<Parameters<typeof ReadVi
     <ReadView
       read={full}
       isEmpty={(d) => d.items.length === 0}
-      empty={<EmptyState message={EMPTY} action={<a href="/decisions">Open decisions</a>} />}
+      empty={<EmptyState message={EMPTY} action={<a href="https://example.test/docs">Open the docs</a>} />}
       {...extra}
     >
       {(d) => (
@@ -192,7 +192,7 @@ describe("ReadView (I22: a failed or unfinished read is never shown as empty, an
   it("success with no rows shows the empty sentence and its one action", () => {
     view({ status: "success", data: { items: [] } });
     expect(screen.getByText(EMPTY)).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Open decisions" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open the docs" })).toBeInTheDocument();
   });
 
   it("success with rows renders them", () => {

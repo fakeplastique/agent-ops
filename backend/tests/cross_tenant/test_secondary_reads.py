@@ -26,7 +26,11 @@ pytestmark = pytest.mark.anyio
 
 # Not tenant reads: login flow, health, process metrics, and the cookie session's own identity.
 SKIP = {"/healthz", "/readyz", "/metrics", "/api/v1/auth/login", "/api/v1/auth/callback"}
-SKIP |= {"/api/v1/auth/session", "/api/v1/auth/demo/users"}
+SKIP |= {
+    "/api/v1/auth/session",
+    "/api/v1/auth/demo/users",
+    "/api/v1/me/organizations",
+}  # no id; cookie session or public demo
 
 
 def queries(a: dict) -> dict[str, list[dict]]:

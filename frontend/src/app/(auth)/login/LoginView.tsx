@@ -1,8 +1,9 @@
 "use client";
 
-import { rememberNext, resetClient } from "@/lib/session";
+import { resetClient, safeNext } from "@/lib/session";
 
 import { AuthFrame, Notice, primaryButton } from "../AuthFrame";
+import { DemoSignIn } from "./DemoSignIn";
 
 // Keyed by the callback's error code; the parameter's own text never reaches the page. No copy says whether an account exists.
 const ERRORS: Record<string, { title: string; note: string }> = {
@@ -16,18 +17,19 @@ export function LoginView({ error, next }: { error: string | null; next: string 
   const problem = error ? (Object.hasOwn(ERRORS, error) ? ERRORS[error] : FAILED) : null;
 
   // The next identity starts clean: nothing the previous user left in this browser survives the round trip.
-  const begin = () => {
-    resetClient();
-    rememberNext(next);
-  };
+  const begin = () => resetClient();
+  // The API keeps a same-origin next with the login flow and sends the user there after Google.
+  const safe = safeNext(next);
+  const href = safe ? `/api/v1/auth/login?next=${encodeURIComponent(safe)}` : "/api/v1/auth/login";
 
   return (
     <AuthFrame title="Sign in to Agent Ops" lead="Review and sign off what your agents ask to do.">
       {problem && <Notice title={problem.title}>{problem.note}</Notice>}
       {/* A plain link: the API answers with the redirect to Google, so it works before scripts load. */}
-      <a href="/api/v1/auth/login" onClick={begin} className={primaryButton}>
+      <a href={href} onClick={begin} className={primaryButton}>
         Continue with Google
       </a>
+      <DemoSignIn />
     </AuthFrame>
   );
 }

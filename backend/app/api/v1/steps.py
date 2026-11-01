@@ -16,7 +16,7 @@ from app.config import settings
 from app.db.session import tenant_session
 from app.domain.errors import Forbidden
 from app.domain.receipt import KeyRing
-from app.services import steps
+from app.services import decision_reads, steps
 
 router = APIRouter(tags=["approval-steps"])
 
@@ -44,6 +44,30 @@ class PendingStepOut(BaseModel):
     title: str
     effective_risk_level: str
     requested_by_agent_id: uuid.UUID | None
+
+
+class StepOut(BaseModel):
+    id: uuid.UUID
+    request_version: int
+    level: int
+    required_role: str
+    status: str
+    due_at: datetime
+    decided_at: datetime | None
+    decided_by: str | None
+    stands_in_for_level: int | None
+    created_at: datetime
+
+
+class LevelOut(BaseModel):
+    level: int
+    role: str
+    timeout_minutes: int
+
+
+class StepsPage(Page[StepOut]):
+    levels: list[LevelOut]
+    quorum: int
 
 
 def require_user(actor: Principal) -> UserPrincipal:
@@ -101,3 +125,21 @@ async def pending_approvals(
         rows = await steps.pending_for(s, user.organization_id, user.user_id)
     items = [PendingStepOut(**r) for r in rows[page.skip : page.skip + page.limit]]
     return paginate(request, items, len(rows), page.skip, page.limit)
+
+
+@router.get("/decision-requests/{decision_request_id}/steps", response_model=StepsPage)
+async def list_request_steps(
+    decision_request_id: uuid.UUID,
+    request: Request,
+    actor: ActorDep,
+    engine: EngineDep,
+    page: Annotated[PaginationParams, Depends()],
+) -> StepsPage:
+    """The approval ladder of one request, readable by anyone who may read the request."""
+    async with tenant_session(engine, actor.organization_id) as s:
+        out = await decision_reads.list_steps(
+            s, actor.organization_id, decision_request_id, page.skip, page.limit
+        )
+    items = [StepOut(**x) for x in out["items"]]
+    base = paginate(request, items, out["total"], page.skip, page.limit)
+    return StepsPage(**base.model_dump(), levels=out["levels"], quorum=out["quorum"])

@@ -106,3 +106,42 @@ async def list_messages(
     rows = (await session.execute(_MESSAGES, args | {"skip": skip, "limit": limit})).mappings()
     total = await session.scalar(_MESSAGE_COUNT, args)
     return [dict(m) for m in rows.all()], int(total or 0)
+
+
+_STEPS = text(
+    "select s.id, s.request_version, s.level, s.required_role, s.status, s.due_at, s.decided_at,"
+    " u.full_name as decided_by, s.stands_in_for_level, s.created_at"
+    " from approval_steps s left join users u on u.id = s.approver_user_id"
+    " where s.organization_id = :o and s.decision_request_id = :r"
+    " order by s.request_version, s.level, s.id limit :limit offset :skip"
+)
+_STEP_COUNT = text(
+    "select count(*) from approval_steps where organization_id = :o and decision_request_id = :r"
+)
+_LEVELS = text(
+    "select policy_snapshot->'levels' as levels, (policy_snapshot->>'quorum_size')::int as quorum"
+    " from decision_requests where organization_id = :o and id = :r"
+)
+
+
+async def list_steps(
+    session: AsyncSession, o: uuid.UUID, r: uuid.UUID, skip: int, limit: int
+) -> dict[str, Any]:
+    """The request's approval steps (all versions) with the policy's level ladder and quorum, for the timeline.
+    Only the ladder leaves the snapshot, never the rest of it."""
+    snap = (await session.execute(_LEVELS, {"o": o, "r": r})).mappings().first()
+    if snap is None:
+        raise NotFoundError  # a missing or foreign request, not an empty ladder
+    args = {"o": o, "r": r}
+    rows = (await session.execute(_STEPS, args | {"skip": skip, "limit": limit})).mappings().all()
+    total = await session.scalar(_STEP_COUNT, args)
+    levels = [
+        {"level": i, "role": lv["role"], "timeout_minutes": lv["timeout_minutes"]}
+        for i, lv in enumerate(snap["levels"], start=1)
+    ]
+    return {
+        "items": [dict(x) for x in rows],
+        "total": int(total or 0),
+        "levels": levels,
+        "quorum": snap["quorum"],
+    }

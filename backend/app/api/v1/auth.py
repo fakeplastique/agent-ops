@@ -18,7 +18,7 @@ from app.api.deps import (
 from app.api.errors import error_responses
 from app.authz.origin import require_same_origin
 from app.config import settings
-from app.domain.errors import NotFoundError
+from app.domain.errors import NotFoundError, OidcFailed
 from app.services import demo, oidc, web_sessions
 from app.services.web_sessions import ABSOLUTE, WebSession
 
@@ -48,8 +48,8 @@ class OrganizationIn(BaseModel):
 
 
 @router.get("/login")
-async def login(cfg: OidcDep, redis: RedisDep) -> RedirectResponse:
-    url, state = await oidc.begin_login(cfg, redis)
+async def login(cfg: OidcDep, redis: RedisDep, next: str | None = None) -> RedirectResponse:
+    url, state = await oidc.begin_login(cfg, redis, next)
     response = RedirectResponse(url, status_code=302)
     # Binds the flow to this browser (login CSRF). Lax: it is sent on the top-level GET back from the issuer.
     response.set_cookie(
@@ -64,7 +64,12 @@ async def login(cfg: OidcDep, redis: RedisDep) -> RedirectResponse:
     return response
 
 
-@router.get("/callback", responses=error_responses(400))
+def _login_error(code: str) -> RedirectResponse:
+    # A browser lands here, so a failure is a page with a fixed code, never the JSON error body.
+    return RedirectResponse(f"{settings.web_origin}/login?error={code}", status_code=302)
+
+
+@router.get("/callback", status_code=302)
 async def callback(
     request: Request,
     cfg: OidcDep,
@@ -73,11 +78,19 @@ async def callback(
     clock: ClockDep,
     code: str = "",
     state: str = "",
+    error: str = "",
 ) -> RedirectResponse:
-    who = await oidc.complete_login(cfg, redis, code, state, request.cookies.get(STATE_COOKIE))
+    if (
+        error
+    ):  # the issuer sent the user back without a code; only a cancelled consent is told apart
+        return _login_error("access_denied" if error == "access_denied" else "login_failed")
+    try:
+        who = await oidc.complete_login(cfg, redis, code, state, request.cookies.get(STATE_COOKIE))
+    except OidcFailed:
+        return _login_error("login_failed")
     user_id = await web_sessions.find_or_create_user(engine, who.email, who.name)
     raw = await web_sessions.start_session(engine, user_id, clock, request.cookies.get(COOKIE))
-    response = RedirectResponse(f"{settings.web_origin}/", status_code=302)
+    response = RedirectResponse(f"{settings.web_origin}{who.next or '/inbox'}", status_code=302)
     _set_cookie(response, raw)
     response.delete_cookie(STATE_COOKIE, path=FLOW_PATH, secure=True, httponly=True, samesite="lax")
     return response

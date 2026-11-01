@@ -19,9 +19,11 @@ export class ApiError extends Error {
 }
 
 /** timeoutMs covers the whole call, body included (default 15 s; the /events long-poll needs longer). */
-type Options = { method?: string; body?: unknown; signal?: AbortSignal; timeoutMs?: number };
+type Options = { method?: string; body?: unknown; headers?: Record<string, string>; signal?: AbortSignal; timeoutMs?: number };
 
-const timedOut = () => new ApiError(0, "timeout", "The server took too long to answer");
+const isRaw = (b: unknown): b is FormData | Blob => b instanceof FormData || b instanceof Blob;
+
+const timedOut =() => new ApiError(0, "timeout", "The server took too long to answer");
 
 // Rejects as soon as the deadline or the caller's signal fires, even if the wrapped read never settles (a stalled body).
 function bounded<R>(p: Promise<R>, deadline: AbortSignal, signal?: AbortSignal): Promise<R> {
@@ -73,7 +75,7 @@ function toLogin() {
 /** Same-origin JSON call to the REST API. Resolves only on 2xx; everything else rejects with ApiError. */
 export async function api<T = unknown>(
   path: string,
-  { method = "GET", body, signal, timeoutMs = TIMEOUT_MS }: Options = {},
+  { method = "GET", body, headers, signal, timeoutMs = TIMEOUT_MS }: Options = {},
 ): Promise<T> {
   const deadline = new AbortController();
   const timer = setTimeout(() => deadline.abort(), timeoutMs);
@@ -85,8 +87,9 @@ export async function api<T = unknown>(
         fetch(`${BASE}${path}`, {
           method,
           credentials: "same-origin",
-          headers: body === undefined ? undefined : { "content-type": "application/json" },
-          body: body === undefined ? undefined : JSON.stringify(body),
+          // A file or form is sent as is: the browser sets its content type (a File's own type, or the multipart boundary).
+          headers: { ...(body === undefined || isRaw(body) ? {} : { "content-type": "application/json" }), ...headers },
+          body: body === undefined ? undefined : isRaw(body) ? body : JSON.stringify(body),
           signal: signal ? AbortSignal.any([signal, deadline.signal]) : deadline.signal,
         }),
       );
