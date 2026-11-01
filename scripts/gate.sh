@@ -62,6 +62,7 @@ dev_db() {
 }
 step "migrate dev db" dev_db
 step "backend tests" uv run --project backend pytest backend/tests
+step "docs drift" "${DOCS_CHECK:-scripts/check_docs.sh}"
 
 step "images" images
 step "version skew" "${SKEW_CHECK:-scripts/skew_check.sh}"

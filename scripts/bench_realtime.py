@@ -165,9 +165,9 @@ async def head(c: Client) -> int:
     """The organization's current newest seq: every client starts after it, so history is not replayed."""
     after = 0
     while True:
-        feed = (
-            await c.http.get(f"/api/v1/events?after={after}&wait=0", headers=_hdr(c))
-        ).json()
+        r = await c.http.get(f"/api/v1/events?after={after}&wait=0", headers=_hdr(c))
+        r.raise_for_status()
+        feed = r.json()
         if not feed["events"] and feed["after"] == after:
             return after
         after = feed["after"]
