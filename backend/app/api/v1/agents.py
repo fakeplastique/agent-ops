@@ -30,6 +30,7 @@ class AgentOut(BaseModel):
     owner_user_id: uuid.UUID
     status: str
     created_at: datetime
+    updated_at: datetime  # the revocation time once status is revoked (a revoked agent is final)
 
 
 class AgentToken(BaseModel):

@@ -1,5 +1,6 @@
 import json
 import uuid
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy import text
@@ -13,6 +14,7 @@ from app.domain.errors import (
     PolicyAbovePlan,
     PolicyExceedsPlan,
     PolicyUnresolved,
+    StaleVersion,
 )
 from app.domain.risk import ACTION_TYPE, effective_risk
 from app.services import audit, cache, plans
@@ -249,13 +251,17 @@ async def get_policy(session: AsyncSession, org: uuid.UUID, policy_id: uuid.UUID
 
 async def update_policy(
     session: AsyncSession, org: uuid.UUID, actor: uuid.UUID, policy_id: uuid.UUID,
-    fields: dict[str, Any],
+    fields: dict[str, Any], expected_updated_at: datetime | None = None,
 ) -> dict:  # fmt: skip
-    """Merge the sent fields and re-check the whole policy: edits cannot sneak past the plan."""
+    """Merge the sent fields and re-check the whole policy: edits cannot sneak past the plan.
+
+    With expected_updated_at, the edit applies only to the version the caller read (StaleVersion otherwise)."""
     # Row lock before the merge: a concurrent PATCH must merge into this one's result, not the old row.
     current = (await session.execute(_LOCK_ONE, {"o": org, "i": policy_id})).mappings().first()
     if current is None:
         raise NotFoundError
+    if expected_updated_at is not None and current["updated_at"] != expected_updated_at:
+        raise StaleVersion
     merged = {f: fields.get(f, current[f]) for f in FIELDS}
     # No flag check here: the team was gated at create, and after a downgrade the admin must be able
     # to edit the policy down to the plan (the above-plan check still applies).
