@@ -1,10 +1,7 @@
 import { expect, PEOPLE, signInAs, test, unique } from "./fixtures";
 
-// The Attachments tab (spec 8.1) needs S32, which is not on this branch yet: written now, enabled by the coordinator
-// once S32 merges (change `test.fixme` to `test`). Selectors follow the spec text and may need a touch-up then.
 
-test.fixme("Pro: an attachment is uploaded from the tab and listed with a download link", async ({ page, agents }, info) => {
-  // FIXME(S32): the attachments API and tab are not merged yet.
+test("Pro: an attachment is uploaded from the tab and listed with a download link", async ({ page, agents }, info) => {
   const req = await agents.create({ title: unique("Refund with receipt", info) });
   await signInAs(page, PEOPLE.manager);
   await page.goto(`/decisions/${req.id}?tab=attachments`);
