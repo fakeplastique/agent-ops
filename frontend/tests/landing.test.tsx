@@ -38,7 +38,7 @@ describe("Landing", () => {
     }
     expect(html).toContain("Do you run my agents?");
     expect(html).toContain("Refund order #48213");
-    for (const credit of ["Cleveland Museum of Art", "Wellcome Collection", "Noun Project", "Natural Earth"]) {
+    for (const credit of ["Jakub Żerdzicki", "Michael Walter", "Unsplash", "Noun Project", "Natural Earth"]) {
       expect(html).toContain(credit);
     }
     // The receipt is signed on the server, so the signature is readable without scripts.
@@ -46,12 +46,12 @@ describe("Landing", () => {
     expect(html.match(/<h1/g)).toHaveLength(1);
   });
 
-  // CC BY needs the licence, the source and a note that the picture was changed; "Sign in" must reach the login.
-  it("credits link to licence and source, and say the pictures were cropped and resized", async () => {
+  // Unsplash asks for no credit, but we give photographer and the exact photo page; "Sign in" must reach the login.
+  it("credits link to each photo's own page, and the archival credits are gone", async () => {
     const html = renderToString(await Page());
-    expect(html).toContain('href="https://creativecommons.org/licenses/by/4.0/"');
-    expect(html).toMatch(/href="https:\/\/commons\.wikimedia\.org\/[^"]*Mister[^"]*"/);
-    expect(html).toMatch(/cropped and resized/i);
+    expect(html).toContain('href="https://unsplash.com/photos/man-signing-a-document-with-a-pen-QI6NLgN5XnM"');
+    expect(html).toContain('href="https://unsplash.com/photos/official-receipt-on-white-surface-iJMitgqRaZ8"');
+    expect(html).not.toMatch(/Wikimedia|Wellcome|Cleveland|creativecommons/);
     expect(html).toMatch(/<a[^>]*href="\/login"[^>]*>Sign in</);
   });
 
@@ -60,11 +60,18 @@ describe("Landing", () => {
     expect(readFileSync(join(SRC, "../Dockerfile"), "utf8")).toMatch(/^COPY public \.\/public$/m);
   });
 
-  it("uses the four credited pictures that exist on disk", async () => {
+  // Two photographs (credited, on disk, described) and two drawn compositions (decoration, hidden from readers).
+  it("uses two credited photographs that exist on disk and two decorative SVG compositions", async () => {
     const html = renderToString(await Page());
-    const srcs = [...html.matchAll(/<img[^>]+src="(\/landing\/[^"]+)"/g)].map((m) => m[1]);
-    expect(srcs).toHaveLength(4);
-    for (const s of srcs) expect(() => readFileSync(join(SRC, "../public", s))).not.toThrow();
+    const imgs = [...html.matchAll(/<img[^>]*src="(\/landing\/[^"]+)"[^>]*>/g)];
+    expect(imgs.map((m) => m[1])).toEqual(["/landing/hand-signing.jpg", "/landing/receipt-desk.jpg"]);
+    for (const [tag, src] of imgs) {
+      expect(() => readFileSync(join(SRC, "../public", src))).not.toThrow();
+      expect(tag).toMatch(/alt="[^"]{12,}"/);
+    }
+    const pics = [...html.matchAll(/<svg[^>]*data-pic="[^"]+"[^>]*>/g)].map((m) => m[0]);
+    expect(pics).toHaveLength(2);
+    for (const tag of pics) expect(tag).toContain('aria-hidden="true"');
   });
 
   // The page shares DESIGN.md's single sans face and its colour tokens.

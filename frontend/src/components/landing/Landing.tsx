@@ -1,8 +1,9 @@
-/* eslint-disable @next/next/no-img-element -- four small, pre-sized archival JPEGs served as static files */
+/* eslint-disable @next/next/no-img-element -- two small, pre-sized photographs served as static files */
 import "./landing.css";
 
 import { Earth } from "./Earth/Earth";
 import { Orb } from "./Orb/Orb";
+import { Converge, Rail } from "./Pics";
 import { ReceiptDemo } from "./ReceiptDemo";
 import type { Receipt } from "./receipt";
 
@@ -60,14 +61,10 @@ const ART: Record<string, React.ReactNode> = {
   t8: <span className="ln-big">60</span>,
 };
 
-const COMMONS = "https://commons.wikimedia.org/w/index.php?search=";
-const CC = "https://creativecommons.org/";
-// [title, creator, [licence name, link] or ["", "public domain"], source (a Commons search for the title)]
-const PICTURES = [
-  ["Almond-shaped seal matrix", "Cleveland Museum of Art", ["CC0", `${CC}publicdomain/zero/1.0/`], `${COMMONS}almond-shaped+seal+Cleveland+Museum+of+Art`],
-  ["Mexico 1901 notary sealing stamp", "unknown author", ["", "public domain"], `${COMMONS}notary+sealing+stamp+Mexico+1901`],
-  ["Savings book", "Polish Postal Savings Bank", ["", "public domain"], `${COMMONS}savings+book+Pocztowa+Kasa+Oszczednosci`],
-  ["Account-book of Thomas Mister", "Wellcome Collection", ["CC BY 4.0", `${CC}licenses/by/4.0/`], `${COMMONS}Account-book+of+Thomas+Mister+Wellcome`],
+// [photographer, photo page on Unsplash (free under the Unsplash License, as each page states), subject]
+const PHOTOS = [
+  ["Jakub Żerdzicki", "https://unsplash.com/photos/man-signing-a-document-with-a-pen-QI6NLgN5XnM", "Signing a document"],
+  ["Michael Walter", "https://unsplash.com/photos/official-receipt-on-white-surface-iJMitgqRaZ8", "A crumpled receipt"],
 ] as const;
 
 const FAQ = [
@@ -208,7 +205,7 @@ function Plans() {
     <section id="plans" aria-label="Plans">
       <div className="ln-plans">
         <div className="ln-plan" data-plan="free">
-          <img className="ln-pic" src="/landing/savings-book.jpg" width={230} height={174} loading="lazy" alt="A savings book with an empty table of entries, Poland, 1930s" />
+          <Converge className="ln-pic" />
           <h2>Free</h2>
           <p className="ln-who">For trying a team of agents on real decisions.</p>
           <p className="ln-incl">One approval level, up to three reviewers, one voting round. No attachments, Telegram or analytics.</p>
@@ -262,7 +259,7 @@ function Faq() {
             ))}
           </div>
           <figure className="ln-fp">
-            <img src="/landing/account-book.jpg" width={440} height={440} loading="lazy" alt="A page of an 18th-century account book with handwritten entries" />
+            <img src="/landing/hand-signing.jpg" width={440} height={440} loading="lazy" alt="Close-up of a hand signing a printed form with a pen, a second hand holding the page" />
           </figure>
         </div>
       </div>
@@ -275,7 +272,7 @@ function Cta() {
     <section className="ln-cta-row" id="cta" aria-labelledby="cta-h">
       <div className="ln-in ln-crow">
         <div className="ln-flank" data-side="l">
-          <img src="/landing/notary-seal.jpg" width={360} height={360} loading="lazy" alt="A notary’s embossed star seal on a document, Mexico, 1901" />
+          <Rail />
         </div>
         <div className="ln-ctile">
           <h2 id="cta-h">Let agents ask first.</h2>
@@ -290,7 +287,7 @@ function Cta() {
           </div>
         </div>
         <div className="ln-flank" data-side="r">
-          <img src="/landing/almond-seal.jpg" width={360} height={360} loading="lazy" alt="A gilt almond-shaped seal matrix from the 14th century" />
+          <img src="/landing/receipt-desk.jpg" width={360} height={360} loading="lazy" alt="A crumpled printed receipt with a barcode on a white surface" />
         </div>
       </div>
     </section>
@@ -357,12 +354,12 @@ function Footer() {
         <div className="ln-last">
           <div className="ln-credits">
             <p>
-              Agent Ops. Pictures, all cropped and resized for this page, via Wikimedia Commons:
+              Agent Ops. Photographs from Unsplash, cropped and resized for this page:
             </p>
             <ul>
-              {PICTURES.map(([title, by, licence, source]) => (
-                <li key={title}>
-                  <a href={source}>{title}</a>, {by}, {licence[0] ? <a href={licence[1]}>{licence[0]}</a> : licence[1]}
+              {PHOTOS.map(([by, source, what]) => (
+                <li key={by}>
+                  {what}, <a href={source}>{by}, Unsplash</a>
                 </li>
               ))}
             </ul>

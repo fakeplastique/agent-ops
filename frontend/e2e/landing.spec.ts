@@ -25,3 +25,21 @@ test("the earth band draws a simulated feed", async ({ page }) => {
   const box = (await earth.boundingBox())!;
   expect(Math.abs(box.width - box.height)).toBeLessThan(1);
 });
+
+test("the photographs load, the compositions are decoration, the credits link to the photo pages", async ({ page }) => {
+  await page.goto("/");
+  const photos = page.locator(".ln img[src^='/landing/']");
+  await expect(photos).toHaveCount(2);
+  for (const img of await photos.all()) {
+    // The questions photo is hidden below 1000px by design: a hidden lazy image never loads.
+    if (!(await img.isVisible())) continue;
+    await img.scrollIntoViewIfNeeded();
+    await expect.poll(() => img.evaluate((el: HTMLImageElement) => el.complete && el.naturalWidth > 0)).toBe(true);
+  }
+  const pics = page.locator("svg[data-pic]");
+  await expect(pics).toHaveCount(2);
+  for (const svg of await pics.all()) await expect(svg).toHaveAttribute("aria-hidden", "true");
+  const credits = page.locator(".ln-credits");
+  await expect(credits.getByRole("link", { name: /Jakub/ })).toHaveAttribute("href", /unsplash\.com\/photos\/man-signing/);
+  await expect(credits.getByRole("link", { name: /Michael Walter/ })).toHaveAttribute("href", /unsplash\.com\/photos\/official-receipt/);
+});
