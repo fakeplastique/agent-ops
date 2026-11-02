@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { api, ApiError } from "@/lib/api/client";
+import { api, ApiError, setSigningOut } from "@/lib/api/client";
 import { goTo } from "@/lib/api/navigate";
 
 vi.mock("@/lib/api/navigate", () => ({ goTo: vi.fn() }));
@@ -62,6 +62,18 @@ describe("api client", () => {
     vi.stubGlobal("fetch", reply(401, envelope("unauthenticated")));
     await failure(api("/auth/session"));
     expect(goTo).not.toHaveBeenCalled();
+  });
+
+  // A poll's 401 during sign-out must not race the sign-out's own navigation with a ?next= redirect.
+  it("401 while signing out does not redirect", async () => {
+    setSigningOut(true);
+    try {
+      vi.stubGlobal("fetch", reply(401, envelope("unauthenticated")));
+      await failure(api("/events?after=0&wait=25"));
+      expect(goTo).not.toHaveBeenCalled();
+    } finally {
+      setSigningOut(false);
+    }
   });
 
   it("429 surfaces Retry-After in seconds", async () => {

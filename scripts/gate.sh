@@ -26,9 +26,10 @@ fi
 
 # Production images build, run as non-root and pass their healthchecks (compose prod profile).
 images() {
-  local rc=0 prod="docker compose --profile prod"
-  # A lane builds and runs its own stack (random host ports) so lanes never share containers.
-  [ -z "$LANE" ] || { prod="docker compose -p webtech-gate-$LANE --profile prod"; export PG_PUBLISH=5432 REDIS_PUBLISH=6379; }
+  # Always its own stack (random host ports): migrate.sh alters cluster-wide roles (app_rt, app_worker), which
+  # must never leak into the shared postgres that the backend tests and other lanes use.
+  local rc=0 prod="docker compose -p webtech-gate-${LANE:-main} --profile prod"
+  export PG_PUBLISH=5432 REDIS_PUBLISH=6379
   $prod build || rc=1
   # Railway's pre-deploy command: the image itself must be able to migrate as the owner (it also creates
   # app_rt, which a lane's fresh postgres lacks, so it runs before the api starts).
@@ -45,7 +46,7 @@ asyncio.run(m())" 2>&1)
   done
   ((rc == 0)) || $prod logs --tail 30
   $prod rm -sf api web worker >/dev/null
-  [ -z "$LANE" ] || $prod down -v >/dev/null 2>&1
+  $prod down -v >/dev/null 2>&1
   return $rc
 }
 
