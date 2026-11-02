@@ -88,10 +88,10 @@ class Settings(BaseSettings):
         if (
             os.environ.get("RAILWAY_ENVIRONMENT")
             and self.file_storage == "local"
-            and self.file_url_secret == DEV_FILE_URL_SECRET
+            and (self.file_url_secret == DEV_FILE_URL_SECRET or len(self.file_url_secret) < 32)
         ):
             raise ValueError(
-                "FILE_URL_SECRET must be set on Railway: the dev secret is public in git"
+                "FILE_URL_SECRET must be set on Railway (32+ characters, not the dev secret)"
             )
         return self
 

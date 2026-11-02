@@ -1,3 +1,4 @@
+import json
 import os
 
 from mcp.server.auth.middleware.bearer_auth import AuthenticatedUser
@@ -8,9 +9,9 @@ from mcp.types import Tool as MCPTool
 from starlette.applications import Starlette
 from starlette.responses import PlainTextResponse
 from starlette.routing import Route
-from starlette.types import ASGIApp, Receive, Scope, Send
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from app.api.limits import MCP_BODY_SIZE
+from app.api.limits import MAX_BODY_SIZE, MCP_BODY_SIZE
 from app.authz.principals import AgentPrincipal
 from app.config import settings
 from app.mcp import resources
@@ -79,6 +80,68 @@ class PostOnly:
         await self.app(scope, receive, send)
 
 
+class ToolBodyBudget:
+    """1 MB for every /mcp body; 10 MB of file (14 MB as base64) only for an authenticated `add_attachment`
+    call. A big body is buffered up to the cap, then its JSON-RPC method and tool name are checked, so an
+    unauthenticated caller, another tool or a batch cannot use the large cap."""
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def _refuse(self, scope: Scope, receive: Receive, send: Send) -> None:
+        await PlainTextResponse("Request body too large", 413)(scope, receive, send)
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        authed = isinstance(scope.get("user"), AuthenticatedUser)
+        cap = MCP_BODY_SIZE if authed else MAX_BODY_SIZE
+        declared = dict(scope["headers"]).get(b"content-length")
+        if declared is not None and declared.isdigit() and int(declared) <= MAX_BODY_SIZE:
+            await self.app(scope, receive, send)  # the common small call streams through untouched
+            return
+        if declared is not None and declared.isdigit() and int(declared) > cap:
+            await self._refuse(scope, receive, send)
+            return
+        chunks, size = [], 0
+        while True:
+            message = await receive()
+            if message["type"] != "http.request":
+                return  # the client left
+            size += len(message.get("body", b""))
+            if size > cap:
+                await self._refuse(scope, receive, send)
+                return
+            chunks.append(message.get("body", b""))
+            if not message.get("more_body"):
+                break
+        body = b"".join(chunks)
+        if size > MAX_BODY_SIZE and not _is_add_attachment(body):
+            await self._refuse(scope, receive, send)
+            return
+        sent = False
+
+        async def replay() -> Message:
+            nonlocal sent
+            if not sent:
+                sent = True
+                return {"type": "http.request", "body": body, "more_body": False}
+            return await receive()
+
+        await self.app(scope, replay, send)
+
+
+def _is_add_attachment(body: bytes) -> bool:
+    try:
+        rpc = json.loads(body)
+    except ValueError:
+        return False
+    params = rpc.get("params") if isinstance(rpc, dict) else None
+    return (
+        isinstance(params, dict)
+        and rpc.get("method") == "tools/call"
+        and params.get("name") == "add_attachment"
+    )
+
+
 def http_app() -> Starlette:
     """A fresh Streamable HTTP app at /mcp (stateless, JSON replies); its lifespan runs the SDK's task group."""
     app = mcp.streamable_http_app(
@@ -88,5 +151,5 @@ def http_app() -> Starlette:
         max_request_body_size=MCP_BODY_SIZE,  # add_attachment carries a 10 MB file as base64
     )
     (route,) = [r for r in app.routes if isinstance(r, Route) and r.path == "/mcp"]
-    route.app = PostOnly(route.app)
+    route.app = PostOnly(ToolBodyBudget(route.app))
     return app

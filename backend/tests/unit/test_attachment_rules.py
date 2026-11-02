@@ -100,3 +100,44 @@ def test_hosted_local_storage_refuses_the_dev_url_secret_and_s3_needs_its_bucket
     monkeypatch.setenv("FILE_STORAGE", "ftp")
     with pytest.raises(ValueError, match="FILE_STORAGE"):
         Settings()
+
+
+def test_hosted_file_url_secret_must_be_long_enough(monkeypatch):
+    # catches: an empty or tiny HMAC key passing the "not the dev default" guard (review C1)
+    from app.config import Settings
+
+    monkeypatch.setenv("RAILWAY_ENVIRONMENT", "production")
+    monkeypatch.setenv("RECEIPT_KEYS", "k:" + "r" * 40)
+    monkeypatch.setenv("WEBHOOK_SECRET_KEYS", f"k:{'A' * 43}=")
+    for weak in ("", "short", "x" * 31):
+        monkeypatch.setenv("FILE_URL_SECRET", weak)
+        with pytest.raises(ValueError, match="FILE_URL_SECRET"):
+            Settings()
+    monkeypatch.setenv("FILE_URL_SECRET", "x" * 32)
+    assert Settings().file_url_secret == "x" * 32
+
+
+@pytest.mark.parametrize(
+    "name, declared, body",
+    [
+        ("a.csv", "application/vnd.ms-excel", b"a,b\n1,2\n"),
+        ("a.csv", "text/plain", b"a,b\n1,2\n"),
+        ("a.csv", "application/csv", b"a,b\n1,2\n"),
+        ("a.jpg", "image/jpg", b"\xff\xd8\xff\xe0"),
+        ("a.jpeg", "image/pjpeg", b"\xff\xd8\xff\xe0"),
+        ("a.json", "text/json", b'{"a": 1}'),
+    ],
+)
+def test_browser_type_aliases_pass_with_the_extensions_stored_type(name, declared, body):
+    # catches: a real browser's Content-Type for CSV or JPEG refused (review C5)
+    stored = a.check_upload(name, declared, body, final=True)
+    assert stored == a.ALLOWED["." + name.rsplit(".", 1)[1]][0]
+
+
+def test_aliases_do_not_relax_the_content_check_or_other_extensions():
+    with pytest.raises(UnsupportedFileType):
+        a.check_upload("a.csv", "application/vnd.ms-excel", b"<html></html>", final=True)
+    with pytest.raises(UnsupportedFileType):
+        a.check_upload("a.png", "text/plain", PNG, final=True)
+    with pytest.raises(UnsupportedFileType):
+        a.check_upload("a.pdf", "application/vnd.ms-excel", PDF, final=True)

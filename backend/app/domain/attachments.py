@@ -29,6 +29,13 @@ ALLOWED: dict[str, tuple[str, str]] = {
     ".docx": (DOCX, "zip"),
     ".xlsx": (XLSX, "zip"),
 }
+# Types a browser sends for a file of that extension besides the canonical one (OS-registered types).
+ALIASES: dict[str, set[str]] = {
+    ".csv": {"application/csv", "application/vnd.ms-excel", "text/plain"},
+    ".jpg": {"image/jpg", "image/pjpeg"},
+    ".jpeg": {"image/jpg", "image/pjpeg"},
+    ".json": {"text/json"},
+}
 _UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
 KEY_RE = re.compile(f"{_UUID}/{_UUID}/{_UUID}")  # <organization>/<request>/<attachment>
 _DROP = {
@@ -105,7 +112,7 @@ def check_name(filename: str, declared: str | None) -> tuple[str, str]:
     if ext not in ALLOWED:
         raise UnsupportedFileType("this file type is not allowed")
     content_type, kind = ALLOWED[ext]
-    if declared is not None and _media_type(declared) != content_type:
+    if declared is not None and _media_type(declared) not in {content_type, *ALIASES.get(ext, ())}:
         raise UnsupportedFileType("the declared content type does not match the file name")
     return content_type, kind
 
