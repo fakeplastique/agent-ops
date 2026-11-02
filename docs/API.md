@@ -51,6 +51,13 @@ with the cookie must carry an `Origin` equal to `WEB_ORIGIN` (bearer calls need 
 | `POST /api/v1/decision-requests/{decision_request_id}/messages` | agent or user, W | only while a discussion is open (`pending_discussion` through `pending_approval`) |
 | `GET /api/v1/decision-requests/{decision_request_id}/messages` | any member | |
 | `GET /api/v1/decision-requests/{decision_request_id}/receipt` | any member | 404 unless approved |
+| `GET /api/v1/decision-requests/{decision_request_id}/steps` | any member | approval steps of every version plus the policy ladder (`levels`) and `quorum`, for the rail and timeline; nothing else of the policy snapshot |
+| `POST /api/v1/decision-requests/{decision_request_id}/attachments` | agent or user, W, Pro (`attachments`) | `?filename=`; the file is the raw body (`Content-Type` its type), 10 MB counted while it streams (413); extension, declared type and magic bytes must agree on the allowlist (pdf, png, jpg, gif, webp, txt, csv, json, docx, xlsx), else 415; SVG, HTML and XML are refused |
+| `GET /api/v1/decision-requests/{decision_request_id}/attachments` | any member, Pro | list (sanitised display name, type, size, uploader) |
+| `GET /api/v1/decision-requests/{decision_request_id}/attachments/{attachment_id}/download` | any member, Pro | same check as reading the request, then 307 to a signed URL valid 5 minutes |
+| `DELETE /api/v1/decision-requests/{decision_request_id}/attachments/{attachment_id}` | the uploader or an org_admin, W | audit row, no event |
+| `GET /api/v1/files/{token}` | the token is the credential | local storage only: the signed URL a download redirects to (HMAC over key, expiry, name, type); expired, altered and unknown are one 404; served as `attachment` with `nosniff` and `CSP: sandbox` |
+| `GET /api/v1/search` | any member, Enterprise (`search`) | `q`, `skip`, `limit`; full text over titles, descriptions and messages (`websearch_to_tsquery`, `q` 1-200 chars); one hit per request with `matched_in` and `rank`; at most the best 1000 (`skip` <= 1000, `limit` <= 100); votes are never indexed |
 | `POST /api/v1/receipts/verify` | nobody needs a credential | takes the receipt object; answers only `{valid}`; limited per IP |
 
 ### Approvals
@@ -121,6 +128,7 @@ de-duplicate on `webhook-id`.
 | `GET /api/v1/me/tokens/{token_id}`, `DELETE /api/v1/me/tokens/{token_id}` | the token's own user | another user's id is 404 |
 | `POST /api/v1/me/telegram/link-code` | session, flag `telegram` (Pro) | 8 characters, 10 minutes, once |
 | `GET /api/v1/me/telegram`, `DELETE /api/v1/me/telegram` | users | unlinking is never plan-gated |
+| `GET /api/v1/me/organizations` | web session only (a bearer gets 401) | the caller's own memberships `{items: [{id, name, role}]}` for the organization switcher; works before an organization is selected |
 
 The Telegram webhook (`/api/v1/telegram/webhook`, POST) is not in OpenAPI: 404 while `TELEGRAM_WEBHOOK_SECRET` is unset, 401 unless
 `X-Telegram-Bot-Api-Secret-Token` matches. `/metrics` (GET, Prometheus text, cache hit and miss counters) answers only with
@@ -137,15 +145,6 @@ The Telegram webhook (`/api/v1/telegram/webhook`, POST) is not in OpenAPI: 404 w
 
 `/ws` (the WebSocket, at the API root) is not an HTTP route in OpenAPI; see [REALTIME.md](REALTIME.md).
 
-<!-- planned -->
-### Not on this base yet (from the spec, verify at merge)
-
-- **Search (slice S33, Enterprise).** `GET /api/v1/search` with `q`, tenant-filtered, paginated and plan-gated (flag `search`) over decision
-  titles, descriptions and messages; round-1 vote text is not indexed. The MCP tool `search_decisions` is the same query.
-- **Attachments (slice S32, Pro).** Upload, list, download and delete under a decision request, 10 MB, a content-type allowlist and a
-  sanitised filename that never becomes the storage key. Downloads redirect to a signed URL that expires in 5 minutes, after the same
-  authorization as reading the request. The MCP tool `add_attachment` is the same upload.
-<!-- /planned -->
 
 ## MCP tools
 

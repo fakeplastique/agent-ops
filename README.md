@@ -114,10 +114,13 @@ Environment variables only; `.env.example` lists the dev defaults. Hosted runs (
 | `API_ORIGIN` | `http://localhost:8000` | read at `next build`: where the web app's rewrites send `/api` |
 | `APP_RT_PASSWORD` | dev password | replaces the `app_rt` password in `scripts/migrate.sh`; required on Railway |
 | `APP_WORKER_PASSWORD` | unset | when set, `scripts/migrate.sh` lets `app_worker` log in with it; the worker service needs it in `WORKER_DATABASE_URL` |
+| `FILE_STORAGE` | `local` | `local` or `s3` attachment storage |
+| `FILE_LOCAL_ROOT` | `<system temp>/agent-ops-files` | where the local adapter keeps files; set a persistent path outside dev |
+| `FILE_URL_SECRET` | dev key | HMAC key for local signed download URLs; on Railway with `local`, 32+ characters and not the dev value |
+| `S3_ENDPOINT_URL`, `S3_PUBLIC_ENDPOINT_URL` | empty | S3-compatible endpoint (internal) and the host presigned URLs use |
+| `S3_BUCKET`, `S3_REGION` | empty | bucket and region for the `s3` adapter |
+| `S3_ACCESS_KEY`, `S3_SECRET_KEY` | empty | credentials for the `s3` adapter (optional dev store: `docker compose --profile storage up -d garage`, then `scripts/garage-init.sh`) |
 
-> **Not on this base yet (from the spec, verify at merge).** Attachments (slice S32) add a `FileStorage` port with local-disk and
-> S3-compatible adapters and a Garage service in `compose.yaml`, with their own variables; search (S33) adds `GET /search` and the
-> `search_decisions` tool. Neither is described above beyond this note.
 
 ## Deploy
 
