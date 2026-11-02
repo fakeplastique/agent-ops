@@ -76,7 +76,9 @@ if curl -sf localhost:$API_PORT/healthz >/dev/null; then
   echo "FAIL api port: something already answers on :$API_PORT"
   failed+=("api port")
 else
-  uv run --project backend uvicorn app.main:app --app-dir backend --port $API_PORT --log-level warning &
+  # Demo mode lets the browser journeys sign in as each seeded role; the limits are lifted because one IP signs in a lot.
+  DEMO_MODE=true WEB_ORIGIN=http://localhost:$WEB_PORT WRITE_LIMIT_PER_PRINCIPAL=100000 WRITE_LIMIT_PER_ORG=100000 \
+    uv run --project backend uvicorn app.main:app --app-dir backend --port $API_PORT --log-level warning &
   api=$!
   trap 'kill $api 2>/dev/null' EXIT
 fi
