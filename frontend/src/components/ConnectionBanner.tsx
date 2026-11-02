@@ -8,7 +8,7 @@ const box = "m-0 flex min-h-control items-center rounded-control bg-pill-warning
 export function ConnectionBanner() {
   const { status, reason } = useConnection();
   return (
-    <div role="status" aria-live="polite">
+    <div role="status" aria-live="polite" className="has-[p]:mb-4">
       {status === "paused" && <p className={box}>Live updates paused, reconnecting</p>}
       {status === "stopped" && (
         <p className={box}>

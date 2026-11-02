@@ -10,6 +10,7 @@ import type { Page, PendingStep } from "@/lib/api/types";
 import { roleLabel } from "@/lib/api/types";
 import { useAgentNames } from "@/lib/api/useAgents";
 import { useRead } from "@/lib/api/useRead";
+import { isApprovalEvent, useRealtimeEvents } from "@/lib/realtime/react";
 import { timeLeft } from "@/lib/time";
 import { useNow } from "@/lib/useNow";
 
@@ -76,6 +77,11 @@ export function Inbox() {
   const [note, setNote] = useState<string | null>(null);
   const root = useRef<HTMLDivElement>(null);
   const back = useRef<HTMLButtonElement>(null);
+
+  // A step arrived or was decided elsewhere: re-read the list in place (focus and scroll stay where they are).
+  useRealtimeEvents((events) => {
+    if (events.some(isApprovalEvent)) void list.refetch();
+  });
 
   const items = list.data?.items ?? [];
   // The first step opens by default (wide screens show list and pane together) and then stays: a decided step must not

@@ -56,6 +56,12 @@ export function RealtimeProvider({
 
 export const useConnection = () => useContext(Realtime).connection;
 
+/** Events that change what waits for approval (the inbox list and its count). */
+export const isApprovalEvent = (e: RealtimeEvent) => /^(step|decision)\./.test(e.type);
+
+/** Events about one request: step events carry `decision_request_id`, decision events carry `id`. */
+export const touchesRequest = (id: string) => (e: RealtimeEvent) => e.data.decision_request_id === id || e.data.id === id;
+
 /** Calls `handler` for each batch of live events (replayed history is skipped unless `replay` is asked for). */
 export function useRealtimeEvents(handler: Handler, { replay = false } = {}) {
   const { subscribe } = useContext(Realtime);
