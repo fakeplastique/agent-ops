@@ -27,8 +27,8 @@ Answer shape (`GET /api/v1/events` and every WebSocket frame):
 ```
 
 Event types: `decision.created`, `decision.revised`, `decision.status_changed`, `vote.cast`, `round.revealed`, `message.posted`,
-`step.created`, `step.decided`, `step.timed_out` and `plan.changed`. (`attachment.added` and `member.joined` are defined but have no
-emitter yet, so they are not on the feed.)
+`step.created`, `step.decided`, `step.timed_out`, `plan.changed` and `attachment.added` (id, request, type and size; never the
+filename). (`member.joined` is defined but has no emitter yet, so it is not on the feed.)
 
 ## WebSocket
 
