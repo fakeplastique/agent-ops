@@ -67,6 +67,8 @@ step "images" images
 step "version skew" "${SKEW_CHECK:-scripts/skew_check.sh}"
 step "frontend install" pnpm --dir frontend install --frozen-lockfile
 step "frontend lint" pnpm --dir frontend lint
+# Generated route types from an earlier build name routes that may have moved: start from none, as a fresh clone does.
+rm -rf frontend/.next/types frontend/.next/dev
 step "frontend typecheck" pnpm --dir frontend typecheck
 step "frontend tests" pnpm --dir frontend test
 
