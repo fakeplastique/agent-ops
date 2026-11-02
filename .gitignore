@@ -12,7 +12,10 @@ skills-lock.json
 
 # Planning and bootstrap material (local only)
 .ai/
-docs/
+docs/*
+!docs/ARCHITECTURE.md
+!docs/API.md
+!docs/REALTIME.md
 DESIGN.md
 scripts/bootstrap.sh
 
