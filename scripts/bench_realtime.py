@@ -18,6 +18,7 @@ import sys
 import time
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import urlsplit
 
 import httpx2
 import websockets
@@ -442,6 +443,18 @@ if __name__ == "__main__":
         help="load check: read the decision list with --clients workers",
     )
     p.add_argument("--json", action="store_true")
+    p.add_argument(
+        "--allow-remote",
+        action="store_true",
+        help="permit a --base that is not this machine",
+    )
     args = p.parse_args()
+    if (
+        urlsplit(args.base).hostname not in ("localhost", "127.0.0.1", "::1")
+        and not args.allow_remote
+    ):
+        sys.exit(
+            "refusing a non-local --base: the bench signs in as demo users and flips a plan; pass --allow-remote to mean it"
+        )
     out = asyncio.run(main(args))
     print(json.dumps(out, indent=1) if args.json or args.load else table(out))

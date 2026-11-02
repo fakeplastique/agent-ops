@@ -32,14 +32,19 @@ images() {
   $prod build || rc=1
   # Railway's pre-deploy command: the image itself must be able to migrate as the owner (it also creates
   # app_rt, which a lane's fresh postgres lacks, so it runs before the api starts).
-  $prod up -d --wait postgres redis && $prod run --rm --no-deps -e MIGRATE_DATABASE_URL=postgresql://app:app@postgres:5432/agent_ops \
+  $prod up -d --wait postgres redis && $prod run --rm --no-deps -e MIGRATE_DATABASE_URL=postgresql://app:app@postgres:5432/agent_ops -e APP_WORKER_PASSWORD=app_worker \
     api scripts/migrate.sh || { echo "migrate.sh fails inside the api image"; rc=1; }
-  $prod up -d --wait api web || rc=1
-  for s in api web; do
+  $prod up -d --wait api web worker || rc=1
+  # The worker's own login (app_worker, set by migrate.sh) must work: arq --check only proves Redis.
+  who=$($prod exec -T worker python -c "import asyncio,asyncpg,os
+async def m(): print(await (await asyncpg.connect(os.environ['WORKER_DATABASE_URL'])).fetchval('select current_user'))
+asyncio.run(m())" 2>&1)
+  [ "$who" = app_worker ] || { echo "worker cannot log in as app_worker: $who"; rc=1; }
+  for s in api web worker; do
     [ "$($prod exec -T $s id -u 2>/dev/null)" != 0 ] || { echo "$s runs as root"; rc=1; }
   done
   ((rc == 0)) || $prod logs --tail 30
-  $prod rm -sf api web >/dev/null
+  $prod rm -sf api web worker >/dev/null
   [ -z "$LANE" ] || $prod down -v >/dev/null 2>&1
   return $rc
 }

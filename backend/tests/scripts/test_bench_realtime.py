@@ -122,3 +122,13 @@ def test_smoke_prints_every_transport_with_all_metrics(stack: tuple[str, int]) -
         assert r["bytes_per_min"] > 0
         assert r["server_cpu_pct"] is not None
         assert r["server_rss_mb"] > 0
+
+
+def test_a_non_local_base_is_refused_without_the_explicit_flag() -> None:
+    # The bench signs in as demo users and flips a plan: pointed at a real deployment it would change it.
+    out = subprocess.run(
+        [sys.executable, str(BENCH), "--base", "https://agent-ops.example.com", "--smoke"],
+        capture_output=True, text=True, timeout=30, check=False,
+    )  # fmt: skip
+    assert out.returncode != 0
+    assert "--allow-remote" in out.stderr + out.stdout

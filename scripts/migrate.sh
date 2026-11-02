@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# APP_RT_PASSWORD (required when RAILWAY_ENVIRONMENT is set) replaces the dev password. Create the app role, then migrate to head as the owner (MIGRATE_DATABASE_URL); one transaction, all or nothing.
+# APP_RT_PASSWORD (required when RAILWAY_ENVIRONMENT is set) replaces the dev password. APP_WORKER_PASSWORD, when set, lets app_worker log in (the worker service needs it). Create the app role, then migrate to head as the owner (MIGRATE_DATABASE_URL); one transaction, all or nothing.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 : "${MIGRATE_DATABASE_URL:?set MIGRATE_DATABASE_URL to the owner role}"
@@ -29,6 +29,10 @@ async def main() -> None:
         await c.exec_driver_sql(roles)
         if pw := os.environ.get("APP_RT_PASSWORD"):  # the file's dev password must not survive in prod
             stmt = (await c.execute(text("select format('alter role app_rt password %L', cast(:pw as text))"), {"pw": pw})).scalar_one()
+            await c.exec_driver_sql(stmt)
+        # app_worker is NOLOGIN by default (tests SET ROLE into it); a deployment that runs the worker gives it a password.
+        if wpw := os.environ.get("APP_WORKER_PASSWORD"):
+            stmt = (await c.execute(text("select format('alter role app_worker login password %L', cast(:pw as text))"), {"pw": wpw})).scalar_one()
             await c.exec_driver_sql(stmt)
         await c.run_sync(upgrade)
     await engine.dispose()

@@ -131,7 +131,9 @@ cap and tickets live in Redis).
 
 ## Reproduce
 
-Needs the API with `DEMO_MODE=true` on seeded data and the worker running (see the README quick start). Then:
+Needs the API with `DEMO_MODE=true` on seeded data and the worker running, both set up as in the README quick start (the worker
+needs `APP_WORKER_PASSWORD` at migrate time; the wake-ups come from its relay). The bench refuses a `--base` that is not this
+machine unless `--allow-remote` is given, because it signs in as demo users and flips a plan. Then:
 
 ```bash
 uv run --project backend python scripts/bench_realtime.py --base http://localhost:8000 --pid <api pid> --clients 20 --events 30 --interval 2

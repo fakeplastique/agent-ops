@@ -25,5 +25,9 @@ jobs:
       # api first. `railway up --ci` returns after the build, not after the pre-deploy migration, so web may
       # roll out on the old schema: safe only because migrations are additive (expand then contract, D9).
       - run: railway up --service api --ci # repo root: backend/Dockerfile needs scripts/
+      # The worker (relay, timeouts, webhooks, Telegram, analytics) is the same image with another start command. Its Railway
+      # service is created by hand (spec 15); set the repository variable DEPLOY_WORKER=true once it exists.
+      - run: railway up --service worker --ci
+        if: vars.DEPLOY_WORKER == 'true'
       - run: railway up --service web --ci
         working-directory: frontend # `railway up <path>` fails with "prefix not found"; cwd is the upload root

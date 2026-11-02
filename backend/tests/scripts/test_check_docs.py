@@ -66,3 +66,33 @@ def test_a_state_diagram_that_lost_a_transition_fails(copy: Path) -> None:
     out = check(copy)
     assert out.returncode != 0
     assert "pending_approval --> expired" in out.stdout
+
+
+def test_a_documented_mcp_tool_that_does_not_exist_fails(copy: Path) -> None:
+    api = copy / "docs" / "API.md"
+    api.write_text(api.read_text().replace("`get_policy`", "`get_policy`, `ghost_tool`", 1))
+    out = check(copy)
+    assert out.returncode != 0
+    assert "ghost_tool" in out.stdout
+
+
+def test_a_documented_setting_that_does_not_exist_fails(copy: Path) -> None:
+    readme = copy / "README.md"
+    readme.write_text(
+        readme.read_text().replace(
+            "| `METRICS_TOKEN` |", "| `GHOST_SETTING` | | | |\n| `METRICS_TOKEN` |", 1
+        )
+    )
+    out = check(copy)
+    assert out.returncode != 0
+    assert "GHOST_SETTING" in out.stdout
+
+
+def test_a_documented_event_type_that_is_not_emitted_fails(copy: Path) -> None:
+    doc = copy / "docs" / "REALTIME.md"
+    doc.write_text(
+        doc.read_text().replace("and `plan.changed`", "`ghost.event` and `plan.changed`", 1)
+    )
+    out = check(copy)
+    assert out.returncode != 0
+    assert "ghost.event" in out.stdout

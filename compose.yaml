@@ -32,6 +32,22 @@ services:
       test: ["CMD", "python", "-c", "import urllib.request as u; u.urlopen('http://localhost:8000/healthz')"]
       interval: 2s
       retries: 30
+  # The same image as the api, running the arq worker (outbox relay, timeouts, webhooks, Telegram, analytics).
+  worker:
+    profiles: ["prod"]
+    build: { context: ., dockerfile: backend/Dockerfile }
+    command: ["arq", "app.worker.settings.WorkerSettings"]
+    environment:
+      DATABASE_URL: postgresql://app_rt:app_rt@postgres:5432/agent_ops
+      WORKER_DATABASE_URL: postgresql://app_worker:app_worker@postgres:5432/agent_ops # needs APP_WORKER_PASSWORD at migrate time
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "arq", "--check", "app.worker.settings.WorkerSettings"]
+      interval: 2s
+      retries: 30
   web:
     profiles: ["prod"]
     build:

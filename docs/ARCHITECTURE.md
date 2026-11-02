@@ -174,9 +174,12 @@ quorum, rounds, levels) are checked when a request is created or a policy saved,
 
 ## Deployment
 
-`docker compose` runs Postgres and Redis locally and builds the production images (profile `prod`). CI runs `scripts/gate.sh`; a green
-run on `main` triggers `.github/workflows/deploy.yml`, which runs `railway up` for the API (migrating first, as the owner role, in
-Railway's pre-deploy step) and then the web app. Migrations are additive so an older build keeps working while a newer one rolls out.
+`docker compose` runs Postgres and Redis locally and builds the production images (profile `prod`: `api`, `worker`, `web`; the worker is the
+API image started with `arq app.worker.settings.WorkerSettings`). CI runs `scripts/gate.sh`, whose images step starts all three, checks
+they run as non-root and that the worker can log in as `app_worker`. A green run on `main` triggers `.github/workflows/deploy.yml`, which
+runs `railway up` for the API (migrating first, as the owner role, in Railway's pre-deploy step), then the worker, then the web app.
+Migrations are additive so an older build keeps working while a newer one rolls out. The worker's database login is `app_worker`, a
+role with column-limited reads that is `NOLOGIN` until `scripts/migrate.sh` runs with `APP_WORKER_PASSWORD`.
 
 > **In flight on other branches (from the spec, verify at merge).** File storage behind a `FileStorage` port with a local and an
 > S3-compatible adapter, and Postgres full-text search behind a `Search` port (slices S32, S33). The web app screens beyond sign-in

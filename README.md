@@ -24,10 +24,10 @@ Needs Docker, [uv](https://docs.astral.sh/uv/) and [pnpm](https://pnpm.io/) with
 # 1. Postgres 16 and Redis
 docker compose up -d --wait postgres redis
 
-# 2. Install, then migrate as the owner role (this also creates the runtime role app_rt)
+# 2. Install, then migrate as the owner role (this also creates the runtime role app_rt and, with the password, lets app_worker log in)
 uv sync --project backend
 pnpm --dir frontend install
-MIGRATE_DATABASE_URL=postgresql://app:app@localhost:5432/agent_ops scripts/migrate.sh
+MIGRATE_DATABASE_URL=postgresql://app:app@localhost:5432/agent_ops APP_WORKER_PASSWORD=app_worker scripts/migrate.sh
 
 # 3. Demo data: two organizations (Acme Retail on Pro, Birch Studio on Free), one user per role, agents, requests in every status.
 #    The agent tokens and webhook secrets it prints are shown once.
@@ -35,7 +35,8 @@ uv run --project backend python scripts/seed.py
 
 # 4. API (demo mode adds the "Sign in as" buttons and lets an org admin switch plan), worker, web
 DEMO_MODE=true uv run --project backend uvicorn app.main:app --app-dir backend --port 8000
-(cd backend && uv run arq app.worker.settings.WorkerSettings)   # outbox relay, timeouts, webhooks, Telegram, analytics
+(cd backend && WORKER_DATABASE_URL=postgresql://app_worker:app_worker@localhost:5432/agent_ops \
+  uv run arq app.worker.settings.WorkerSettings)                 # outbox relay, timeouts, webhooks, Telegram, analytics
 pnpm --dir frontend dev                                          # http://localhost:3000
 ```
 
@@ -45,9 +46,9 @@ Open <http://localhost:3000>, choose a demo user. The API docs are at <http://lo
 The worker is what moves events from the outbox to webhooks, Telegram, analytics and the WebSocket wake-ups, and what times out
 overdue approval steps. Without it the API still answers; live updates arrive on a 5 s fallback and nothing escalates.
 
-`docker compose --profile prod up --build` builds and runs the production images (`api`, `web`) on top of the two services; it has no
-worker service yet (the worker runs from the same image: `arq app.worker.settings.WorkerSettings`) and does not migrate, so run
-step 2 first.
+`docker compose --profile prod up --build` builds and runs the production images (`api`, `worker`, `web`) on top of the two services. It
+does not migrate: run step 2 first, with `APP_WORKER_PASSWORD=app_worker`, or the worker cannot log in (the `app_worker` role is
+`NOLOGIN` until a password is set).
 
 ## Connect an MCP client
 
@@ -95,7 +96,7 @@ Environment variables only; `.env.example` lists the dev defaults. Hosted runs (
 |---|---|---|
 | `DATABASE_URL` | `app_rt` on localhost | the API and worker's runtime role; non-owner, so RLS applies. The API refuses to start as an owner or `BYPASSRLS` role |
 | `MIGRATE_DATABASE_URL` | `app` on localhost | owner role, used only by `scripts/migrate.sh` |
-| `WORKER_DATABASE_URL` | `app_worker` on localhost | the worker's scan identity (ids of due work only); the role is `NOLOGIN` until an environment gives it a password |
+| `WORKER_DATABASE_URL` | `app_worker` on localhost | the worker's scan identity (ids of due work only); the role is `NOLOGIN` until `scripts/migrate.sh` runs with `APP_WORKER_PASSWORD` |
 | `REDIS_URL` | `redis://localhost:6379/0` | queue, cache, rate limits, realtime tickets and wake-ups |
 | `WEB_ORIGIN` | `http://localhost:3000` | the web app's origin: OAuth redirect, cookie, and the exact `Origin` writes and WebSockets must carry |
 | `OIDC_ISSUER` | `https://accounts.google.com` | login provider |
@@ -112,6 +113,7 @@ Environment variables only; `.env.example` lists the dev defaults. Hosted runs (
 | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, `TELEGRAM_BOT_USERNAME` | empty | no token means nothing is sent; no secret means the webhook answers 404 |
 | `API_ORIGIN` | `http://localhost:8000` | read at `next build`: where the web app's rewrites send `/api` |
 | `APP_RT_PASSWORD` | dev password | replaces the `app_rt` password in `scripts/migrate.sh`; required on Railway |
+| `APP_WORKER_PASSWORD` | unset | when set, `scripts/migrate.sh` lets `app_worker` log in with it; the worker service needs it in `WORKER_DATABASE_URL` |
 
 > **Not on this base yet (from the spec, verify at merge).** Attachments (slice S32) add a `FileStorage` port with local-disk and
 > S3-compatible adapters and a Garage service in `compose.yaml`, with their own variables; search (S33) adds `GET /search` and the
@@ -120,5 +122,12 @@ Environment variables only; `.env.example` lists the dev defaults. Hosted runs (
 ## Deploy
 
 A push to `main` runs the gate (`.github/workflows/ci.yml`); when it passes, `deploy.yml` runs `railway up` for the API, then the
-web app. Migrations run as Railway's pre-deploy command with the owner role, so the database stays private; they are additive
-(expand, then contract) because an older build may still be running. Needs `RAILWAY_TOKEN` in the repository secrets.
+worker, then the web app. Migrations run as Railway's pre-deploy command of the API service with the owner role, so the database
+stays private; they are additive (expand, then contract) because an older build may still be running. Needs `RAILWAY_TOKEN` in the
+repository secrets.
+
+The worker is the API image started with `arq app.worker.settings.WorkerSettings` and is its own Railway service named `worker`.
+Creating that service is a one-time manual step: point it at `backend/Dockerfile` (`RAILWAY_DOCKERFILE_PATH`), set its start command,
+and give it `DATABASE_URL`, `WORKER_DATABASE_URL` (the `app_worker` login), `REDIS_URL`, `RECEIPT_KEYS`, `WEBHOOK_SECRET_KEYS` and the
+Telegram variables. The API service also needs `APP_WORKER_PASSWORD` so its pre-deploy migration sets the login. The deploy
+workflow skips the worker step until the repository variable `DEPLOY_WORKER` is `true`.

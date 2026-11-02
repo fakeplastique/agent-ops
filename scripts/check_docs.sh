@@ -48,11 +48,36 @@ problems += [f"API.md names route {r} that OpenAPI does not have (mark it planne
 for r in sorted(named_planned & code):  # a warning: the merge that lands the route should also drop the banner
     print(f"warning: API.md marks {r} planned but it exists now")
 
-# 2. MCP tools, event types, settings
-tools = [f.__name__ for f in mcp_read.TOOLS] + [f.__name__ for f, _ in mcp_write.TOOLS]
-problems += [f"API.md lacks MCP tool {t}" for t in tools if f"`{t}`" not in api]
-problems += [f"REALTIME.md lacks event type {t}" for t in sorted(TYPES) if f"`{t}`" not in realtime]
-problems += [f"README lacks setting {n.upper()}" for n in Settings.model_fields if f"`{n.upper()}`" not in readme]
+# 2. MCP tools, event types, settings: both directions
+tools = {f.__name__ for f in mcp_read.TOOLS} | {f.__name__ for f, _ in mcp_write.TOOLS}
+settings = {n.upper() for n in Settings.model_fields}
+# Variables the README documents that are not Settings fields (read by the web build and by scripts/migrate.sh).
+extra_env = {"API_ORIGIN", "APP_RT_PASSWORD", "APP_WORKER_PASSWORD"}
+for what, found in (("OpenAPI routes", code), ("MCP tools", tools), ("event types", TYPES), ("settings", settings), ("transitions", TABLE)):
+    if not found:
+        problems.append(f"the code side of the {what} check is empty: the check would pass vacuously")
+
+
+def first_cells(text: str) -> set[str]:
+    """Backticked names in the first column of the markdown table rows in `text`."""
+    return {t for row in re.findall(r"^\| ([^|]*)\|", text, re.M) for t in re.findall(r"`([^`]+)`", row)}
+
+
+tools_doc = api.split("## MCP tools", 1)[-1]
+tools_doc = re.sub(r"<!-- planned -->.*?<!-- /planned -->", "", tools_doc, flags=re.S)
+doc_tools = first_cells(tools_doc)
+problems += [f"API.md lacks MCP tool {t}" for t in sorted(tools - doc_tools)]
+problems += [f"API.md names MCP tool {t} that does not exist" for t in sorted(doc_tools - tools)]
+
+para = re.search(r"Event types:(.*?)\n\n", realtime, re.S)
+doc_events = set(re.findall(r"`([a-z_]+\.[a-z_]+)`", para.group(1).split("(")[0])) if para else set()
+problems += [f"REALTIME.md lacks event type {t}" for t in sorted(set(TYPES) - doc_events)]
+problems += [f"REALTIME.md names event type {t} that is not emitted" for t in sorted(doc_events - set(TYPES))]
+
+conf = readme.split("## Configuration", 1)[-1].split("\n## ", 1)[0]
+doc_env = first_cells(conf)
+problems += [f"README lacks setting {n}" for n in sorted(settings - doc_env)]
+problems += [f"README names setting {n} that does not exist" for n in sorted(doc_env - settings - extra_env)]
 
 # 3. README JSON blocks and the MCP config
 blocks = re.findall(r"```json\n(.*?)```", readme, re.S)
