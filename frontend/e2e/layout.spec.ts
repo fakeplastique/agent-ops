@@ -26,7 +26,8 @@ test("a 200-character title, a 60 KB payload and right-to-left text hold at 375 
   await expect(page.getByRole("list", { name: "Steps waiting on me" })).toBeVisible();
   await settle(page, "inbox-list", info);
 
-  await page.getByRole("button", { name: new RegExp(rtl.title.slice(0, 20)) }).first().click();
+  // The unique suffix, not the shared RTL prefix: the narrow and wide projects use the same manager inbox.
+  await page.getByRole("button", { name: new RegExp(rtl.title.split(" ").slice(-2).join(" ")) }).click();
   await expect(page.getByRole("heading", { level: 2 }).first()).toBeVisible();
   await settle(page, "inbox-rtl", info);
 
