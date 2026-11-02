@@ -90,9 +90,9 @@ def test_a_documented_setting_that_does_not_exist_fails(copy: Path) -> None:
 
 def test_a_documented_event_type_that_is_not_emitted_fails(copy: Path) -> None:
     doc = copy / "docs" / "REALTIME.md"
-    doc.write_text(
-        doc.read_text().replace("and `plan.changed`", "`ghost.event` and `plan.changed`", 1)
-    )
+    text = doc.read_text()
+    assert "`plan.changed`" in text  # the anchor must exist, or the test would pass vacuously
+    doc.write_text(text.replace("`plan.changed`", "`ghost.event`, `plan.changed`", 1))
     out = check(copy)
     assert out.returncode != 0
     assert "ghost.event" in out.stdout
