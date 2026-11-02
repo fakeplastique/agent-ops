@@ -62,9 +62,14 @@ CONFLICT = {
 PLAN = {("post", "/api/v1/decision-requests"), ("post", "/api/v1/escalation-policies")}
 PLAN |= {("get", "/api/v1/stats/summary"), ("get", "/api/v1/stats/timeseries")}  # analytics gate
 PLAN |= {("post", "/api/v1/me/telegram/link-code")}  # flag `telegram`
+_ATT = "/api/v1/decision-requests/{decision_request_id}/attachments"  # flag `attachments`
+PLAN |= {("post", _ATT), ("get", _ATT), ("delete", _ATT + "/{attachment_id}")}
+PLAN |= {("get", _ATT + "/{attachment_id}/download")}
+PLAN |= {("get", "/api/v1/search")}  # flag `search`
 PUBLIC = {"/healthz", "/readyz", "/api/v1/auth/login", "/api/v1/auth/callback"}
 PUBLIC |= {"/api/v1/auth/logout", "/api/v1/receipts/verify"}
 PUBLIC |= {"/api/v1/auth/demo/users", "/api/v1/auth/demo/login"}  # DEMO_MODE only, 404 otherwise
+PUBLIC |= {"/api/v1/files/{token}"}  # a signed download URL: the token is the credential
 UNLIMITED = {"/api/v1/auth/logout", "/api/v1/auth/organization"}  # session-only, no write limit
 NO_ROLE = {
     "/api/v1/auth/session",

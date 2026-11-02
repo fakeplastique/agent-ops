@@ -2,10 +2,12 @@ from fastapi import APIRouter
 
 from app.api.v1 import (
     agents,
+    attachments,
     audit,
     auth,
     decisions,
     events,
+    files,
     invitations,
     me,
     members,
@@ -16,6 +18,7 @@ from app.api.v1 import (
     policies,
     realtime,
     receipts,
+    search,
     stats,
     steps,
     teams,
@@ -35,6 +38,8 @@ api_v1_router.include_router(members.router)
 api_v1_router.include_router(decisions.router)
 api_v1_router.include_router(votes.router)
 api_v1_router.include_router(messages.router)
+api_v1_router.include_router(attachments.router)
+api_v1_router.include_router(files.router)
 api_v1_router.include_router(steps.router)
 api_v1_router.include_router(receipts.router)
 api_v1_router.include_router(audit.router)
@@ -46,6 +51,7 @@ api_v1_router.include_router(plan.router)
 api_v1_router.include_router(platform.router)
 api_v1_router.include_router(webhooks.router)
 api_v1_router.include_router(stats.router)
+api_v1_router.include_router(search.router)
 api_v1_router.include_router(events.router)
 api_v1_router.include_router(telegram_link.router)
 api_v1_router.include_router(telegram_webhook.router)

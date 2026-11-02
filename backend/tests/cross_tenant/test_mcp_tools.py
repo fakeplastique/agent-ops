@@ -26,6 +26,9 @@ TOOLS: dict[str, tuple[str, dict]] = {
     "revise_decision_request": ("id", {"title": "B was here", "session_label": "l"}),
     "withdraw_decision_request": ("id", {"session_label": "l"}),
     "decide_approval_step": ("id", {"request_version": 1, "decision": "approve"}),
+    # S32 and S33 are plan-gated: tenant B below is Enterprise, so the probe reaches the id lookup.
+    "add_attachment": ("id", {"filename": "a.png", "content_base64": "iVBORw0KGgoAAAANSUhEUg=="}),
+    "search_decisions": ("search", {"q": "Refund"}),
 }  # fmt: skip
 # Tools a principal kind may not use at all: B gets the same refusal for A's id and for a missing one.
 REFUSED = {
@@ -72,6 +75,10 @@ async def _probe_all(mcp, app_engine, b, b_user, a_id: str) -> None:
                     # catches: tenant B reading or changing A's request by id, or learning that it exists
                     assert err and (err, text) == await _probe(c, name, nowhere), name
                     assert name in REFUSED[who] or "not found" in text, (who, name, text)
+                elif kind == "search":  # A's title is the query: B must still find nothing of A
+                    r = await c.call_tool(name, TOOLS[name][1])
+                    assert not r.is_error and a_id not in str(r.structured_content), name
+                    assert r.structured_content["total"] == 0, name
                 elif kind == "list":
                     r = await c.call_tool(name, {})
                     assert not r.is_error and a_id not in str(r.structured_content), name
@@ -84,7 +91,7 @@ async def _probe_all(mcp, app_engine, b, b_user, a_id: str) -> None:
 
 async def test_cross_tenant_read_tools_return_not_found(mcp, owner_engine, app_engine):
     a = await make_world(owner_engine, quorum=2)
-    b = await make_world(owner_engine)
+    b = await make_world(owner_engine, "enterprise")
     a_req = await open_request(app_engine, a)
     b_user = await staff(owner_engine, b.org, "org_admin")
     await _probe_all(mcp, app_engine, b, b_user, str(a_req["id"]))
@@ -93,7 +100,7 @@ async def test_cross_tenant_read_tools_return_not_found(mcp, owner_engine, app_e
 async def test_cross_tenant_write_tools_all_not_found(mcp, owner_engine, app_engine):
     # A's request waits for a human: every write would succeed for A's own principals right now.
     _, a_req, _ = await approval_world(owner_engine, app_engine)
-    b = await make_world(owner_engine)
+    b = await make_world(owner_engine, "enterprise")
     b_user = await staff(owner_engine, b.org, "org_admin")
     before = await _state(owner_engine, a_req["id"])
     await _probe_all(mcp, app_engine, b, b_user, str(a_req["id"]))

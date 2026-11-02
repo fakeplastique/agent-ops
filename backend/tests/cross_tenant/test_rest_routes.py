@@ -4,6 +4,7 @@ import re
 import uuid
 
 import pytest
+from sqlalchemy import text
 
 from app.db.session import tenant_session
 from app.main import app
@@ -50,9 +51,13 @@ BODIES = {
     ("PATCH", "/api/v1/escalation-policies/{policy_id}"): {"quorum_size": 1},
     ("PATCH", "/api/v1/webhook-subscriptions/{subscription_id}"): {"active": False},
 }
+# Required query parameters, for the same reason (the upload names its file in the query).
+QUERY = {
+    ("POST", "/api/v1/decision-requests/{decision_request_id}/attachments"): {"filename": "a.png"}
+}
 PARAMS = {
     "organization_id", "invitation_id", "user_id", "decision_request_id", "step_id", "agent_id",
-    "team_id", "policy_id", "token_id", "subscription_id", "delivery_id",
+    "team_id", "policy_id", "token_id", "subscription_id", "delivery_id", "attachment_id",
 }  # fmt: skip
 
 
@@ -92,8 +97,26 @@ async def _tenant_a(owner, app_engine):
     [(delivery,)] = await fetch(
         owner, "select id from webhook_deliveries where subscription_id=:s", s=hook["id"]
     )
+    async with (
+        owner.begin() as conn
+    ):  # the owner skips RLS; the row only needs to exist for the probe
+        attachment = (
+            await conn.execute(
+                text(
+                    "insert into attachments (organization_id, decision_request_id, filename, content_type,"
+                    " size_bytes, storage_key, uploaded_by_type, uploaded_by_id)"
+                    " values (:o, :r, 'a.png', 'image/png', 1, :k, 'agent', :a) returning id"
+                ),
+                {
+                    "o": w.org,
+                    "r": escalated["id"],
+                    "a": w.identity,
+                    "k": f"{w.org}/{escalated['id']}/{uuid.uuid4()}",
+                },
+            )
+        ).scalar_one()
     ids = {
-        "organization_id": w.org, "invitation_id": invite, "user_id": w.owner_user,
+        "attachment_id": attachment, "organization_id": w.org, "invitation_id": invite, "user_id": w.owner_user,
         "decision_request_id": escalated["id"], "step_id": step, "agent_id": w.identity,
         "team_id": team, "policy_id": w.policy, "token_id": pat, "subscription_id": hook["id"],
         "delivery_id": delivery,
@@ -103,7 +126,7 @@ async def _tenant_a(owner, app_engine):
 
 
 async def _tenant_b_principals(web, owner, app_engine):
-    b = await make_world(owner)
+    b = await make_world(owner, "enterprise")  # gated routes (attachments) must reach the id lookup
     admin = await staff(owner, b.org, "org_admin")
     async with tenant_session(app_engine, b.org) as s:
         _, raw = await create_pat(s, b.org, admin, "b")
@@ -131,16 +154,23 @@ async def test_tenant_b_gets_404_with_tenant_a_ids(route, web, app_engine, owner
         ids["decision_request_id"] = receipt_request  # only an approved request has a receipt
     path = template.format(**ids)
     nowhere = template.format(**{k: uuid.uuid4() for k in PARAMS})
-    body = BODIES.get(route)
+    body, query = BODIES.get(route), QUERY.get(route)
     twin = ("GET", template) in ROUTES or template.endswith("/receipt")
-    before = (await web.client.get(path, headers=a_admin)).json() if twin else None
+    redirects = template.endswith(
+        "/download"
+    )  # A's own read is a 307 to a signed URL, not a JSON body
+    before = (
+        (await web.client.get(path, headers=a_admin)).json() if twin and not redirects else None
+    )
     if twin:  # the ids are real: tenant A itself reads them
-        assert (await web.client.get(path, headers=a_admin)).status_code == 200
+        assert (await web.client.get(path, headers=a_admin)).status_code == (
+            307 if redirects else 200
+        )
     found = []
     for who, h in (await _tenant_b_principals(web, owner_engine, app_engine)).items():
         h = {"Origin": ORIGIN} | h
-        foreign = await web.client.request(method, path, json=body, headers=h)
-        missing = await web.client.request(method, nowhere, json=body, headers=h)
+        foreign = await web.client.request(method, path, json=body, params=query, headers=h)
+        missing = await web.client.request(method, nowhere, json=body, params=query, headers=h)
         # catches: any answer (403, 409, 422, 200) that tells B tenant A's id exists
         assert (foreign.status_code, foreign.json()["error"]["code"]) == (
             missing.status_code,
@@ -151,6 +181,6 @@ async def test_tenant_b_gets_404_with_tenant_a_ids(route, web, app_engine, owner
             found.append(who)
     assert found, "no tenant-B principal reached the id lookup: the probe proves nothing"
     # and nothing of A's changed: its resource reads the same, its agent token still works
-    if twin:
+    if twin and not redirects:
         assert (await web.client.get(path, headers=a_admin)).json() == before
     assert (await web.client.get("/api/v1/me", headers=a_agent)).status_code == 200

@@ -31,6 +31,7 @@ SKIP |= {
     "/api/v1/auth/demo/users",
     "/api/v1/me/organizations",
 }  # no id; cookie session or public demo
+SKIP |= {"/api/v1/search"}  # needs q (a bare call is a 422): probed with A's own words in probes()
 
 
 def queries(a: dict) -> dict[str, list[dict]]:
@@ -57,7 +58,15 @@ def probes(a: dict) -> list[tuple[str, dict]]:
         "/api/v1/stats/summary" in paths and "/api/v1/audit-logs" in paths
     )  # the walk sees routes
     extra = queries(a)
-    return [(p, q) for p in paths for q in ({}, {"limit": 1}, *extra.get(p, []))]
+    found = [(p, q) for p in paths for q in ({}, {"limit": 1}, *extra.get(p, []))]
+    # Tenant A's words, its exact title and its request id as the query: B must get an empty, quiet page.
+    words = (
+        {"q": "Refund"},
+        {"q": "Refund order 7", "limit": 1},
+        {"q": a["request"]},
+        {"q": "approved"},
+    )
+    return found + [("/api/v1/search", q) for q in words]
 
 
 async def _busy(owner, app_engine, w):

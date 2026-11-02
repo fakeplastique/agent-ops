@@ -100,6 +100,7 @@ def test_secretbox_refuses_unusable_keys(spec):
 def test_settings_refuse_the_dev_webhook_key_on_railway(monkeypatch):
     monkeypatch.setenv("RAILWAY_ENVIRONMENT", "production")
     monkeypatch.setenv("RECEIPT_KEYS", "k:" + "r" * 40)
+    monkeypatch.setenv("FILE_URL_SECRET", "f" * 32)  # its own Railway check (S32)
     with pytest.raises(ValueError, match="WEBHOOK_SECRET_KEYS"):
         Settings()
     monkeypatch.setenv("WEBHOOK_SECRET_KEYS", "k:" + base64.b64encode(os.urandom(32)).decode())

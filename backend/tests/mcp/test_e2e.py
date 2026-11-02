@@ -92,6 +92,8 @@ def _args(name: str, rid: str, label: str) -> dict:
         "decide_approval_step": by_id | {"request_version": 1, "decision": "approve"},
         "revise_decision_request": by_id | {"title": "new title", "session_label": label},
         "withdraw_decision_request": by_id | {"session_label": label},
+        "add_attachment": by_id | {"filename": "a.png", "content_base64": "iVBORw0KGgoAAAANSUhEUg=="},
+        "search_decisions": {"q": SECRET},  # the rationale itself is the query: nothing may come back
     }[name]  # fmt: skip
 
 
@@ -99,7 +101,9 @@ LAST = ("revise_decision_request", "withdraw_decision_request")  # they end the 
 
 
 async def test_no_blind_verdict_in_any_tool_output_before_reveal(mcp, owner_engine, app_engine):
-    w = await make_world(owner_engine, floors={"refund": "low"})
+    w = await make_world(
+        owner_engine, "enterprise", floors={"refund": "low"}
+    )  # gated tools run too
     (voter, _), (other, _) = [await add_agent(owner_engine, w) for _ in range(2)]
     manager = await staff(owner_engine, w.org, "manager")
     async with mcp.client(await agent_auth(app_engine, w.org, w.identity)) as requester:
@@ -138,4 +142,5 @@ _TOOLS = [
     "list_open_decisions", "list_my_decisions", "get_decision", "get_discussion",
     "get_decision_result", "get_policy", "create_decision_request", "cast_vote", "post_message",
     "decide_approval_step", "revise_decision_request", "withdraw_decision_request",
+    "add_attachment", "search_decisions",
 ]  # fmt: skip

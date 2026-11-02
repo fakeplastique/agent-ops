@@ -104,11 +104,12 @@ async def drained(app_engine: AsyncEngine, worker_engine: AsyncEngine) -> None:
 
 
 @pytest.fixture
-async def web(app_engine: AsyncEngine, monkeypatch: pytest.MonkeyPatch):
+async def web(app_engine: AsyncEngine, monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     """The app wired to the test database, Redis database 15 and a fake issuer; Secure cookies flow over https."""
     import httpx
     from redis.asyncio import Redis
 
+    from app.adapters.storage_local import LocalStorage
     from app.api import deps
     from app.config import settings
     from app.main import app
@@ -133,8 +134,12 @@ async def web(app_engine: AsyncEngine, monkeypatch: pytest.MonkeyPatch):
     app.dependency_overrides[deps.get_redis] = lambda: redis
     app.dependency_overrides[deps.get_clock] = lambda: clock
     app.dependency_overrides[deps.get_oidc_transport] = lambda: fake.transport()
+    files = LocalStorage(
+        tmp_path / "files", settings.file_url_secret, clock
+    )  # never the shared default root
+    app.dependency_overrides[deps.get_storage] = lambda: files
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url=ORIGIN) as client:
-        yield Harness(client, fake, clock)
+        yield Harness(client, fake, clock, files)
     app.dependency_overrides.clear()
     await redis.flushdb()
     await redis.aclose()

@@ -18,6 +18,16 @@ services:
       interval: 2s
       retries: 30
 
+  # Optional S3-compatible store for attachments (profile storage): `docker compose --profile storage up -d garage`,
+  # then scripts/garage-init.sh. Without it the API keeps files on local disk (FILE_STORAGE=local).
+  garage:
+    profiles: ["storage"]
+    image: dxflrs/garage:v1.0.1
+    volumes:
+      - ./scripts/garage.toml:/etc/garage.toml:ro
+      - garage-data:/var/lib/garage
+    ports: ["${GARAGE_PUBLISH:-3900:3900}"]
+
   # Production images (profile prod): the gate builds them and checks non-root + health.
   api:
     profiles: ["prod"]
@@ -43,3 +53,6 @@ services:
       test: ["CMD", "node", "-e", "fetch('http://localhost:3000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 2s
       retries: 30
+
+volumes:
+  garage-data:

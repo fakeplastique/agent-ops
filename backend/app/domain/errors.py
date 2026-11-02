@@ -192,3 +192,24 @@ class SubscriptionPaused(DomainError):
 
     def __init__(self) -> None:
         super().__init__("the webhook subscription is paused: resume it, then redeliver")
+
+
+class PayloadTooLarge(DomainError):
+    code = "payload_too_large"
+
+    def __init__(self, max_bytes: int = 0) -> None:
+        super().__init__(f"the file exceeds {max_bytes} bytes")
+        self.details = {"max_bytes": max_bytes}
+
+
+class UnsupportedFileType(DomainError):
+    """Names the rule, never an internal detail; the allowlist is public in the API docs."""
+
+    code = "unsupported_media_type"
+
+
+class StorageUnavailable(DomainError):
+    code = "storage_unavailable"
+
+    def __init__(self) -> None:
+        super().__init__("file storage is unavailable; retry shortly")

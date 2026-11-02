@@ -88,6 +88,23 @@ ROUTES: dict[tuple[str, str], str] = {
         "POST",
         "/api/v1/webhook-subscriptions/{subscription_id}/deliveries/{delivery_id}/redeliver",
     ): "tenant B re-sends tenant A's events",
+    # S32, probed with every principal by tests/cross_tenant/test_rest_routes.py.
+    (
+        "POST",
+        "/api/v1/decision-requests/{decision_request_id}/attachments",
+    ): "tenant B uploads into tenant A's request",
+    (
+        "GET",
+        "/api/v1/decision-requests/{decision_request_id}/attachments",
+    ): "tenant B lists tenant A's attachments",
+    (
+        "GET",
+        "/api/v1/decision-requests/{decision_request_id}/attachments/{attachment_id}/download",
+    ): "tenant B asks for a signed URL to tenant A's file",
+    (
+        "DELETE",
+        "/api/v1/decision-requests/{decision_request_id}/attachments/{attachment_id}",
+    ): "tenant B deletes tenant A's file",
 }
 
 # Routes that carry no tenant data.
@@ -126,6 +143,8 @@ EXEMPT: set[str] = {
     # Aggregates of the caller's own organization, no id parameter (tests/cross_tenant/test_secondary_reads.py).
     "/api/v1/stats/summary",
     "/api/v1/stats/timeseries",
+    # Searches the caller's own organization, no id parameter (tests/cross_tenant/test_secondary_reads.py).
+    "/api/v1/search",
     # The tenant comes from the credential; no id parameter (tests/cross_tenant/test_events.py).
     "/api/v1/events",
     "/api/v1/me/telegram",  # the caller's own link state and unlink, no id parameter
@@ -133,6 +152,9 @@ EXEMPT: set[str] = {
     # Telegram's updates: the tenant comes from the stored button handle, never the update (S31 tests)
     "/api/v1/telegram/webhook",
     "/api/v1/realtime/ticket",  # same: the ticket is bound to the credential's organization
+    # A signed download URL: the HMAC token (key, expiry, name, type) is the credential, like a presigned S3 URL;
+    # B cannot mint one for A's key (tests/integration/test_attachments.py).
+    "/api/v1/files/{token}",
     # Cross-tenant by design for platform admins; everyone else gets 403 before any id is read
     # (tests/integration/test_flag_paths.py::test_platform_admin_only_from_env_allowlist).
     "/api/v1/platform/organizations/{organization_id}/plan",

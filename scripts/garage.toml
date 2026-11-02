@@ -1,0 +1,13 @@
+# Single-node Garage for local development (docker compose --profile storage). Not for production:
+# the secrets are public in git and the node keeps one copy of the data.
+metadata_dir = "/var/lib/garage/meta"
+data_dir = "/var/lib/garage/data"
+db_engine = "sqlite"
+replication_factor = 1
+
+rpc_bind_addr = "0.0.0.0:3901"
+rpc_secret = "0000000000000000000000000000000000000000000000000000000000000001"
+
+[s3_api]
+s3_region = "garage"
+api_bind_addr = "0.0.0.0:3900"

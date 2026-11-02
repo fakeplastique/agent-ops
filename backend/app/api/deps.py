@@ -1,3 +1,4 @@
+from pathlib import Path
 from typing import Annotated
 
 import httpx2
@@ -6,6 +7,8 @@ from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from app.adapters.clock import SystemClock
+from app.adapters.storage_local import LocalStorage
+from app.adapters.storage_s3 import S3Storage
 from app.api.ratelimit import auth_failed, check_ip, check_user_write, check_write
 from app.authz.matrix import Action, Role, can
 from app.authz.origin import require_same_origin
@@ -15,12 +18,14 @@ from app.config import settings
 from app.db.engine import make_engine
 from app.domain.errors import Forbidden, LoginUnavailable, Unauthenticated
 from app.ports.clock import Clock
+from app.ports.storage import FileStorage
 from app.services.oidc import OidcConfig
 from app.services.web_sessions import WebSession, load_session, role_in
 
 COOKIE = "aop_session"
 _engine: AsyncEngine | None = None
 _redis: Redis | None = None
+_storage: FileStorage | None = None
 
 
 def get_engine() -> AsyncEngine:
@@ -39,6 +44,23 @@ def get_redis() -> Redis:
 
 def get_clock() -> Clock:
     return SystemClock()
+
+
+def get_storage() -> FileStorage:
+    """The configured file store; tests override this with their own root."""
+    global _storage
+    if _storage is None:
+        if settings.file_storage == "s3":
+            _storage = S3Storage(
+                endpoint=settings.s3_endpoint_url, public_endpoint=settings.s3_public_endpoint_url,
+                bucket=settings.s3_bucket, access_key=settings.s3_access_key,
+                secret_key=settings.s3_secret_key, region=settings.s3_region,
+            )  # fmt: skip
+        else:
+            _storage = LocalStorage(
+                Path(settings.file_local_root), settings.file_url_secret, get_clock()
+            )
+    return _storage
 
 
 def get_oidc_transport() -> httpx2.AsyncBaseTransport | None:
@@ -62,6 +84,7 @@ def get_oidc(
 EngineDep = Annotated[AsyncEngine, Depends(get_engine)]
 RedisDep = Annotated[Redis, Depends(get_redis)]
 ClockDep = Annotated[Clock, Depends(get_clock)]
+StorageDep = Annotated[FileStorage, Depends(get_storage)]
 OidcDep = Annotated[OidcConfig, Depends(get_oidc)]
 
 

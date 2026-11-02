@@ -53,6 +53,9 @@ DOMAIN_STATUS_CODES: dict[type[DomainError], int] = {
     de.IdempotencyKeyReuse: 422,
     de.RateLimited: 429,
     de.RateLimiterUnavailable: 503,
+    de.PayloadTooLarge: 413,
+    de.UnsupportedFileType: 415,
+    de.StorageUnavailable: 503,
 }
 
 
@@ -88,8 +91,11 @@ _DOC = {
     403: "Role, principal kind or origin not allowed",
     404: "Not found (also another organization's id)",
     409: "Conflicts with the current state or version",
+    413: "The file is over the size limit",
+    415: "The file type is not allowed",
     422: "Invalid input",
     429: "Rate limited; see Retry-After",
+    503: "A dependency (file storage) is unavailable; retry shortly",
 }
 
 

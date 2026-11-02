@@ -23,6 +23,10 @@ _TABLE: dict[str, tuple[Action, tuple[str, ...]]] = {
     "step.created": (Action.READ, (*_STEP, "required_role", "stands_in_for_level")),
     "step.decided": (Action.READ, (*_STEP, "decision")),
     "step.timed_out": (Action.READ, _STEP),
+    "attachment.added": (
+        Action.READ,
+        ("id", "decision_request_id", "content_type", "size_bytes"),
+    ),
     "plan.changed": (Action.READ_PLAN, ("organization_id", "from", "to")),
 }
 _REVEALED_VOTE = ("session_id", "verdict", "confidence")
