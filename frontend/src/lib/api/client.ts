@@ -66,7 +66,14 @@ async function toError(res: Response): Promise<ApiError> {
 }
 
 // Session expired: sign in again and come back here. Never from the login page (that would loop).
+// Set while signing out: a poll's 401 must not race the sign-out navigation with its own ?next= redirect.
+let signingOut = false;
+export function setSigningOut(on: boolean) {
+  signingOut = on;
+}
+
 function toLogin() {
+  if (signingOut) return;
   const { pathname, search } = window.location;
   if (pathname === "/login" || pathname.startsWith("/login/")) return;
   goTo(`/login?next=${encodeURIComponent(pathname + search)}`);

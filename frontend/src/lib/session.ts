@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import type { Read } from "@/components/states/States";
-import { api } from "@/lib/api/client";
+import { api, setSigningOut } from "@/lib/api/client";
 import { goTo } from "@/lib/api/navigate";
 
 export type Session = { user_id: string; organization_id: string | null; role: string | null };
@@ -54,6 +54,7 @@ const tabChannel = () =>
 
 /** Ends the session (the local copy goes even if the call fails) with a full load; `back` returns the next sign-in there. */
 export async function signOut(back?: string) {
+  setSigningOut(true); // the page is leaving: in-flight reads that now 401 must not redirect elsewhere
   try {
     await api("/auth/logout", { method: "POST" });
   } catch {}
