@@ -2,12 +2,14 @@
 
 import { createContext, useContext, useEffect, useMemo, type ReactNode } from "react";
 
+import { ConnectionBanner } from "@/components/ConnectionBanner";
 import { OrgSwitcher } from "@/components/OrgSwitcher";
 import { ReadView } from "@/components/states/States";
 import { goTo } from "@/lib/api/navigate";
 import type { Page } from "@/lib/api/types";
 import { roleLabel } from "@/lib/api/types";
 import { useRead } from "@/lib/api/useRead";
+import { isApprovalEvent, RealtimeProvider, useRealtimeEvents } from "@/lib/realtime/react";
 import { signOut, useIdentitySync, useSession, type Session } from "@/lib/session";
 
 import { Shell } from "./Shell";
@@ -91,14 +93,26 @@ export function AppShell({ children }: { children: ReactNode }) {
   }
 
   return (
-    <AppContext.Provider value={app}>
-      <Shell
-        org={<OrganizationSlot session={app.session} />}
-        user={<UserRow role={app.session.role} />}
-        inboxCount={pending.status === "success" ? (pending.data?.total ?? 0) : 0}
-      >
-        {children}
-      </Shell>
-    </AppContext.Provider>
+    <RealtimeProvider>
+      <AppContext.Provider value={app}>
+        <LiveCount refetch={refetchPending} />
+        <Shell
+          org={<OrganizationSlot session={app.session} />}
+          user={<UserRow role={app.session.role} />}
+          inboxCount={pending.status === "success" ? (pending.data?.total ?? 0) : 0}
+        >
+          <ConnectionBanner />
+          {children}
+        </Shell>
+      </AppContext.Provider>
+    </RealtimeProvider>
   );
+}
+
+/** The sidebar's inbox count follows the feed (the Inbox and Decision screens re-read their own lists). */
+function LiveCount({ refetch }: { refetch: () => unknown }) {
+  useRealtimeEvents((events) => {
+    if (events.some(isApprovalEvent)) void refetch();
+  });
+  return null;
 }

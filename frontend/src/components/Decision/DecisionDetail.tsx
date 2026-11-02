@@ -11,6 +11,7 @@ import { useApp } from "@/components/shell/AppShell";
 import type { Page, PendingStep } from "@/lib/api/types";
 import { useAgentNames } from "@/lib/api/useAgents";
 import { useRead } from "@/lib/api/useRead";
+import { touchesRequest, useUpdatedNotice } from "@/lib/realtime/react";
 import { clockTime } from "@/lib/time";
 import { useNow } from "@/lib/useNow";
 
@@ -40,6 +41,10 @@ const TABS: TabDef[] = [
 export function DecisionDetail({ id, tab, onTab }: { id: string; tab: string; onTab: (tab: string) => void }) {
   const read = useDecisionBundle(id);
   const mySteps = useRead<Page<PendingStep>>("/me/pending-approvals?limit=100");
+  const { updated } = useUpdatedNotice(touchesRequest(id), () => {
+    void read.refetch();
+    void mySteps.refetch();
+  });
   const agents = useAgentNames();
   const { refreshInbox } = useApp();
   const now = useNow();
@@ -71,6 +76,7 @@ export function DecisionDetail({ id, tab, onTab }: { id: string; tab: string; on
                   Version {d.version} · {clockTime(d.created_at, now)}
                 </span>
                 {read.isFetching && <span role="status">Updating</span>}
+                {updated && <span role="status">Updated</span>}
               </p>
               <p className="m-0 mt-2 max-w-(--measure)">{findingLine(b, now)}</p>
             </div>

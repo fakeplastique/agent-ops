@@ -8,6 +8,7 @@ import { findingLine, railProps } from "@/components/Decision/model";
 import { useDecisionBundle } from "@/components/Decision/useDecisionBundle";
 import { ReadView } from "@/components/states/States";
 import type { PendingStep } from "@/lib/api/types";
+import { touchesRequest, useUpdatedNotice } from "@/lib/realtime/react";
 import { clockTime } from "@/lib/time";
 import { useNow } from "@/lib/useNow";
 
@@ -31,6 +32,7 @@ export function Pane({
   onReload: () => void;
 }) {
   const read = useDecisionBundle(step.decision_request_id);
+  const { updated } = useUpdatedNotice(touchesRequest(step.decision_request_id), read.refetch);
   const now = useNow();
   return (
     <ReadView read={read} label="Request" role="manager">
@@ -55,6 +57,7 @@ export function Pane({
                     Version {d.version} · {clockTime(d.created_at, now)}
                   </span>
                   {read.isFetching && <span role="status">Updating</span>}
+                  {updated && <span role="status">Updated</span>}
                 </p>
               </div>
               {rail && <DecisionRail {...rail} />}
