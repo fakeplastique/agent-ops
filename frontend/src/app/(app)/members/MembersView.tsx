@@ -98,7 +98,7 @@ function Members({ me }: { me: string }) {
                             aria-disabled={last || busyId === m.user_id}
                             aria-describedby={last ? reasonId : undefined}
                             onChange={(e) => !last && busyId === null && void mutate(m, () => api(`/members/${m.user_id}`, { method: "PATCH", body: { role: e.target.value } }))}
-                            className={`${inputClass} w-auto aria-disabled:opacity-60`}
+                            className={`${inputClass} w-auto aria-disabled:bg-raised aria-disabled:text-muted`}
                           >
                             {ROLES.map((r) => (
                               <option key={r} value={r}>
@@ -107,7 +107,7 @@ function Members({ me }: { me: string }) {
                             ))}
                           </select>
                           {last ? (
-                            <button type="button" aria-disabled="true" aria-describedby={reasonId} className="inline-flex h-control items-center rounded-control border border-control px-4 font-medium text-muted opacity-60 max-lg:h-touch">
+                            <button type="button" aria-disabled="true" aria-describedby={reasonId} className="inline-flex h-control items-center rounded-control border border-field bg-raised px-4 font-medium text-muted cursor-default max-lg:h-touch coarse:h-touch">
                               Remove
                             </button>
                           ) : (

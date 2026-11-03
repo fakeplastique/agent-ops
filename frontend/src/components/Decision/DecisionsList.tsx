@@ -23,7 +23,7 @@ const SORTS = [
 ] as const;
 const FILTERS = ["status", "risk_level", "agent_id", "q"] as const;
 
-const control = "h-control rounded-control border border-control bg-surface px-2 text-text max-lg:h-touch";
+const control = "h-control rounded-control border border-field bg-surface px-2 text-text max-lg:h-touch coarse:h-touch";
 
 /** Next params with `change` applied: an empty value removes the key, and any change but paging itself returns to page 1. */
 function withParams(params: URLSearchParams, change: Record<string, string>) {
@@ -157,32 +157,32 @@ export function DecisionsList({ params, onParams }: { params: URLSearchParams; o
       >
         {(p) => (
           <>
-            <table className="w-full border-collapse text-left max-lg:block">
-              <thead className="max-lg:sr-only">
-                <tr className="border-b border-border text-small text-muted">
-                  <th scope="col" className="py-2 pr-3 font-medium">Request</th>
-                  <th scope="col" className="py-2 pr-3 font-medium">Agent</th>
-                  <th scope="col" className="py-2 pr-3 font-medium">Risk</th>
-                  <th scope="col" className="py-2 pr-3 font-medium">Status</th>
-                  <th scope="col" className="py-2 text-right font-medium">Created</th>
+            <table role="table" className="w-full border-collapse text-left max-lg:block">
+              <thead role="rowgroup" className="max-lg:sr-only">
+                <tr role="row" className="border-b border-border text-small text-muted">
+                  <th role="columnheader" scope="col" className="py-2 pr-3 font-medium">Request</th>
+                  <th role="columnheader" scope="col" className="py-2 pr-3 font-medium">Agent</th>
+                  <th role="columnheader" scope="col" className="py-2 pr-3 font-medium">Risk</th>
+                  <th role="columnheader" scope="col" className="py-2 pr-3 font-medium">Status</th>
+                  <th role="columnheader" scope="col" className="py-2 text-right font-medium">Created</th>
                 </tr>
               </thead>
-              <tbody className="max-lg:block">
+              <tbody role="rowgroup" className="max-lg:block">
                 {p.items.map((d) => (
-                  <tr key={d.id} className="min-h-row border-b border-rule hover:bg-raised max-lg:flex max-lg:min-h-16 max-lg:flex-wrap max-lg:items-center max-lg:gap-x-2 max-lg:gap-y-1 max-lg:py-2">
-                    <td className="h-row max-w-0 min-w-0 pr-3 max-lg:h-auto max-lg:w-full max-lg:max-w-none">
+                  <tr key={d.id} role="row" className="min-h-row border-b border-rule hover:bg-raised max-lg:flex max-lg:min-h-16 max-lg:flex-wrap max-lg:items-center max-lg:gap-x-2 max-lg:gap-y-1 max-lg:py-2">
+                    <td role="cell" className="h-row max-w-0 min-w-0 pr-3 max-lg:h-auto max-lg:w-full max-lg:max-w-none">
                       <Link href={`/decisions/${encodeURIComponent(d.id)}`} title={d.title} className="block truncate font-medium text-text no-underline hover:underline">
                         {d.title}
                       </Link>
                     </td>
-                    <td className="pr-3 font-mono text-small max-lg:pr-0">{agents.name(d.requested_by_agent_id)}</td>
-                    <td className="pr-3 max-lg:pr-0">
+                    <td role="cell" className="pr-3 font-mono text-small max-lg:pr-0">{agents.name(d.requested_by_agent_id)}</td>
+                    <td role="cell" className="pr-3 max-lg:pr-0">
                       <RiskPill risk={d.effective_risk_level} />
                     </td>
-                    <td className="pr-3 max-lg:pr-0">
+                    <td role="cell" className="pr-3 max-lg:pr-0">
                       <StatusPill status={d.status} />
                     </td>
-                    <td className="text-right text-small whitespace-nowrap text-muted tabular-nums max-lg:ml-auto">{clockTime(d.created_at, now)}</td>
+                    <td role="cell" className="text-right text-small whitespace-nowrap text-muted tabular-nums max-lg:ml-auto">{clockTime(d.created_at, now)}</td>
                   </tr>
                 ))}
               </tbody>
