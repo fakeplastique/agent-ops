@@ -11,9 +11,9 @@ import { useSession, type Session } from "@/lib/session";
 export { Notice, primaryButton, secondaryButton };
 
 export const dangerButton =
-  "inline-flex h-control items-center justify-center rounded-control border border-negative bg-surface px-4 font-medium text-negative transition-colors hover:bg-pill-negative-bg max-lg:h-touch aria-disabled:cursor-default aria-disabled:opacity-60";
+  "inline-flex h-control items-center justify-center rounded-control border border-negative bg-surface px-4 font-medium text-negative transition-colors hover:bg-pill-negative-bg max-lg:h-touch coarse:h-touch aria-disabled:cursor-default aria-disabled:opacity-60";
 export const inputClass =
-  "h-control w-full rounded-control border border-control bg-surface px-3 text-text max-lg:h-touch aria-invalid:border-negative";
+  "h-control w-full rounded-control border border-field bg-surface px-3 text-text max-lg:h-touch coarse:h-touch aria-invalid:border-negative";
 
 const dateFmt = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
 /** "3 Nov 2026" in UTC, so the same instant reads the same for everyone; empty for a bad value. */
@@ -302,7 +302,7 @@ function SecretBody({ title, intro, label, secret, onClose }: { title: string; i
               rows={3}
               value={secret}
               onFocus={(e) => e.currentTarget.select()}
-              className="w-full resize-none rounded-control border border-control bg-raised p-3 font-mono text-small break-all"
+              className="w-full resize-none rounded-control border border-field bg-raised p-3 font-mono text-small break-all"
             />
           </div>
           <p role="status" className="m-0 min-h-5 text-small text-muted">

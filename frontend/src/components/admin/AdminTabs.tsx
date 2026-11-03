@@ -9,7 +9,7 @@ export function AdminTabs({ current }: { current: "teams" | "members" }) {
           key={t}
           href={`/${t}`}
           aria-current={t === current ? "page" : undefined}
-          className="inline-flex h-control items-center rounded-control px-3 text-muted no-underline hover:bg-raised hover:text-text aria-[current=page]:bg-active aria-[current=page]:font-medium aria-[current=page]:text-text max-lg:h-touch"
+          className="inline-flex h-control items-center rounded-control px-3 text-muted no-underline hover:bg-raised hover:text-text aria-[current=page]:bg-active aria-[current=page]:font-medium aria-[current=page]:text-text max-lg:h-touch coarse:h-touch"
         >
           {t === "teams" ? "Teams" : "Members and invitations"}
         </Link>

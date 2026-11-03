@@ -52,7 +52,7 @@ function UserRow({ role }: { role: string | null }) {
       <button
         type="button"
         onClick={() => void signOut()}
-        className="inline-flex h-control items-center rounded-control px-3 text-muted hover:bg-surface hover:text-text max-lg:h-touch"
+        className="inline-flex h-control items-center rounded-control px-3 text-muted hover:bg-surface hover:text-text max-lg:h-touch coarse:h-touch"
       >
         Sign out
       </button>

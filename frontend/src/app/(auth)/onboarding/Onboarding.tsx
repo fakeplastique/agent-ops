@@ -21,7 +21,7 @@ const slugify = (name: string) =>
     .replace(/^-+|-+$/g, "");
 
 const input =
-  "h-control w-full rounded-control border border-control bg-surface px-3 text-text max-lg:h-touch aria-invalid:border-negative";
+  "h-control w-full rounded-control border border-field bg-surface px-3 text-text max-lg:h-touch coarse:h-touch aria-invalid:border-negative";
 
 function Field({
   label,

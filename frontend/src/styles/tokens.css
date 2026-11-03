@@ -9,6 +9,7 @@
   --border: #e4e7ea;
   --rule: #eff1f3;
   --control: #c9cdd1;
+  --field: #868b91;
   --text: #131416;
   --muted: #5b5e62;
   --accent: #1b6c80;
@@ -45,6 +46,8 @@
 }
 
 /* Colours keep their DESIGN.md names above; utilities read them (bg-ground, text-muted). */
+@custom-variant coarse (@media (pointer: coarse));
+
 @theme inline {
   --color-*: initial;
   --color-ground: var(--ground);
@@ -54,6 +57,7 @@
   --color-border: var(--border);
   --color-rule: var(--rule);
   --color-control: var(--control);
+  --color-field: var(--field);
   --color-text: var(--text);
   --color-muted: var(--muted);
   --color-accent: var(--accent);

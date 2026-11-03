@@ -58,7 +58,7 @@ export function Attachments({ decision }: { decision: Decision }) {
 
   const picker = (
     <div className="flex flex-col gap-2">
-      <label className="inline-flex h-control w-fit cursor-pointer items-center rounded-control border border-control bg-surface px-4 font-medium focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-accent hover:bg-raised max-lg:h-touch">
+      <label className="inline-flex h-control w-fit cursor-pointer items-center rounded-control border border-field bg-surface px-4 font-medium focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-accent hover:bg-raised max-lg:h-touch coarse:h-touch">
         {busy ? "Uploading…" : "Add a file"}
         <input type="file" aria-label="Add a file" disabled={busy} onChange={(e) => void upload(e)} className="sr-only" />
       </label>

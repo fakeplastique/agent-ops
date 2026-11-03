@@ -116,7 +116,7 @@ const toBody = (d: Draft) => ({
   risk_floors: Object.fromEntries(d.floors.map((f) => [f.action, f.risk])),
 });
 
-const small = "inline-flex h-control items-center rounded-control px-3 text-small font-medium text-muted hover:bg-raised hover:text-text max-lg:h-touch";
+const small = "inline-flex h-control items-center rounded-control px-3 text-small font-medium text-muted hover:bg-raised hover:text-text max-lg:h-touch coarse:h-touch";
 
 /**
  * One policy's form. A save sends only the changed fields and the updated_at it started from; the API answers 409

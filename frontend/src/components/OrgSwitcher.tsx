@@ -47,7 +47,7 @@ export function OrgSwitcher({ organizations, currentId }: { organizations: OrgOp
         title={current?.name}
         aria-describedby={state === "failed" ? `${id}-error` : undefined}
         onChange={(e) => void change(e.target.value)}
-        className="h-control w-full truncate rounded-control border border-control bg-surface px-2 font-medium text-text aria-busy:opacity-60 max-lg:h-touch"
+        className="h-control w-full truncate rounded-control border border-field bg-surface px-2 font-medium text-text aria-busy:opacity-60 max-lg:h-touch coarse:h-touch"
       >
         {organizations.map((o) => (
           <option key={o.id} value={o.id}>

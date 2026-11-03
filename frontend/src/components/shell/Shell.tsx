@@ -67,7 +67,7 @@ export function Shell({ children, org, topbar, user, inboxCount }: Props) {
 
       <header className="flex h-topbar items-center justify-between gap-3 px-2 lg:col-start-2 lg:pr-5">
         <Dialog.Root open={open} onOpenChange={setOpen}>
-          <Dialog.Trigger className="inline-flex h-control items-center rounded-control border border-control bg-surface px-3 font-medium max-lg:h-touch lg:hidden">
+          <Dialog.Trigger className="inline-flex h-control items-center rounded-control border border-field bg-surface px-3 font-medium max-lg:h-touch coarse:h-touch lg:hidden">
             Menu
           </Dialog.Trigger>
           <Dialog.Portal>

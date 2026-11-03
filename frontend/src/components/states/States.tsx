@@ -17,7 +17,7 @@ export type Read<T> = {
 type Gate = { feature: string; description: string; onSwitchPlan?: (plan: string) => void };
 
 const primary =
-  "inline-flex h-control items-center rounded-control bg-text px-4 font-medium text-surface transition-opacity hover:opacity-85 max-lg:h-touch";
+  "inline-flex h-control items-center rounded-control bg-text px-4 font-medium text-surface transition-opacity hover:opacity-85 max-lg:h-touch coarse:h-touch";
 
 function Panel({ title, children }: { title: string; children: ReactNode }) {
   const id = useId();

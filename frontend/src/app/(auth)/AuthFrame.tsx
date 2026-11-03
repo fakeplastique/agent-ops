@@ -46,7 +46,7 @@ export function retryNote(e: unknown): string {
 }
 
 export const primaryButton =
-  "inline-flex h-control items-center justify-center rounded-control bg-text px-4 font-medium text-surface no-underline transition-opacity hover:opacity-85 max-lg:h-touch aria-disabled:cursor-default aria-disabled:opacity-60";
+  "inline-flex h-control items-center justify-center rounded-control bg-text px-4 font-medium text-surface no-underline transition-opacity hover:opacity-85 max-lg:h-touch coarse:h-touch aria-disabled:cursor-default aria-disabled:opacity-60";
 
 export const secondaryButton =
-  "inline-flex h-control items-center justify-center rounded-control bg-active px-4 font-medium text-text no-underline transition-colors hover:bg-control max-lg:h-touch aria-disabled:cursor-default aria-disabled:opacity-60";
+  "inline-flex h-control items-center justify-center rounded-control bg-active px-4 font-medium text-text no-underline transition-colors hover:bg-control max-lg:h-touch coarse:h-touch aria-disabled:cursor-default aria-disabled:opacity-60";

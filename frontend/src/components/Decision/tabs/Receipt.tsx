@@ -51,7 +51,7 @@ function Body({ decision }: { decision: Decision }) {
               type="button"
               aria-disabled={checking}
               onClick={() => void verify(r)}
-              className="inline-flex h-control items-center rounded-control border border-control bg-surface px-4 font-medium hover:bg-raised max-lg:h-touch aria-disabled:opacity-60"
+              className="inline-flex h-control items-center rounded-control border border-field bg-surface px-4 font-medium hover:bg-raised max-lg:h-touch coarse:h-touch aria-disabled:opacity-60"
             >
               {checking ? "Verifying…" : "Verify"}
             </button>

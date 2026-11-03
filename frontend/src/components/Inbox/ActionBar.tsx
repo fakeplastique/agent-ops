@@ -23,9 +23,9 @@ type Phase =
   | { kind: "failed"; title: string; note: string };
 
 const button =
-  "inline-flex h-control items-center justify-center rounded-control border px-4 font-medium transition-colors max-lg:h-touch disabled:cursor-not-allowed disabled:opacity-50 aria-disabled:cursor-default aria-disabled:opacity-60";
+  "inline-flex h-control items-center justify-center rounded-control border px-4 font-medium transition-colors max-lg:h-touch coarse:h-touch disabled:cursor-not-allowed disabled:opacity-50 aria-disabled:cursor-default aria-disabled:opacity-60";
 const APPROVE = `${button} border-text bg-text text-surface hover:opacity-85`;
-const REJECT = `${button} border-control bg-surface text-text hover:bg-raised`;
+const REJECT = `${button} border-field bg-surface text-text hover:bg-raised`;
 
 const CONFLICT = new Set(["already_decided", "step_not_pending", "illegal_transition"]);
 
@@ -142,7 +142,7 @@ export function ActionBar({
         rows={2}
         onChange={(e) => setComment(e.target.value)}
         aria-describedby={`${id}-hint`}
-        className="min-h-10 w-full resize-y rounded-control border border-control bg-surface px-2.5 py-2 text-text"
+        className="min-h-10 w-full resize-y rounded-control border border-field bg-surface px-2.5 py-2 text-text"
       />
       <div className="flex gap-2 max-lg:[&>button]:flex-1">
         <button

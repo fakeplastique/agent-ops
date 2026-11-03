@@ -97,7 +97,7 @@ export function Discussion({ decision }: { decision: Decision }) {
           disabled={why !== null}
           aria-describedby={why ? `${id}-why` : undefined}
           onChange={(e) => setText(e.target.value)}
-          className="w-full resize-y rounded-control border border-control bg-surface px-2.5 py-2 text-text disabled:bg-raised disabled:text-muted"
+          className="w-full resize-y rounded-control border border-field bg-surface px-2.5 py-2 text-text disabled:bg-raised disabled:text-muted"
         />
         {why && (
           <p id={`${id}-why`} className="m-0 text-small text-muted">
@@ -110,7 +110,7 @@ export function Discussion({ decision }: { decision: Decision }) {
             type="submit"
             disabled={why !== null || !text.trim()}
             aria-disabled={sending}
-            className="inline-flex h-control items-center rounded-control bg-text px-4 font-medium text-surface transition-opacity hover:opacity-85 max-lg:h-touch disabled:cursor-not-allowed disabled:opacity-50"
+            className="inline-flex h-control items-center rounded-control bg-text px-4 font-medium text-surface transition-opacity hover:opacity-85 max-lg:h-touch coarse:h-touch disabled:cursor-not-allowed disabled:opacity-50"
           >
             {sending ? "Posting…" : "Post"}
           </button>

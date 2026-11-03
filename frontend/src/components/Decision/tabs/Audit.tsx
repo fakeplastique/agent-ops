@@ -63,10 +63,10 @@ export function Audit({ decision }: { decision: Decision }) {
                 {p.skip + 1}-{p.skip + p.items.length} of {p.total}
               </span>
               <span className="flex gap-2">
-                <button type="button" disabled={skip === 0} onClick={() => setSkip(Math.max(0, skip - LIMIT))} className="h-control rounded-control border border-control bg-surface px-3 font-medium hover:bg-raised disabled:cursor-not-allowed disabled:opacity-50 max-lg:h-touch">
+                <button type="button" disabled={skip === 0} onClick={() => setSkip(Math.max(0, skip - LIMIT))} className="h-control rounded-control border border-field bg-surface px-3 font-medium hover:bg-raised disabled:cursor-not-allowed disabled:opacity-50 max-lg:h-touch coarse:h-touch">
                   Previous
                 </button>
-                <button type="button" disabled={skip + p.items.length >= p.total} onClick={() => setSkip(skip + LIMIT)} className="h-control rounded-control border border-control bg-surface px-3 font-medium hover:bg-raised disabled:cursor-not-allowed disabled:opacity-50 max-lg:h-touch">
+                <button type="button" disabled={skip + p.items.length >= p.total} onClick={() => setSkip(skip + LIMIT)} className="h-control rounded-control border border-field bg-surface px-3 font-medium hover:bg-raised disabled:cursor-not-allowed disabled:opacity-50 max-lg:h-touch coarse:h-touch">
                   Next
                 </button>
               </span>

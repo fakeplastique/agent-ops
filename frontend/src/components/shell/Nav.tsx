@@ -39,7 +39,7 @@ export function Nav({ inboxCount = 0, onNavigate }: { inboxCount?: number; onNav
                 onClick={onNavigate}
                 aria-current={current ? "page" : undefined}
                 aria-label={count ? `${item.label}, ${count} waiting` : undefined}
-                className="flex h-control items-center gap-2 rounded-control px-3 text-muted no-underline transition-colors hover:bg-surface hover:text-text aria-[current=page]:bg-active aria-[current=page]:font-medium aria-[current=page]:text-text max-lg:h-touch"
+                className="flex h-control items-center gap-2 rounded-control px-3 text-muted no-underline transition-colors hover:bg-surface hover:text-text aria-[current=page]:bg-active aria-[current=page]:font-medium aria-[current=page]:text-text max-lg:h-touch coarse:h-touch"
               >
                 <svg
                   viewBox="0 0 16 16"
