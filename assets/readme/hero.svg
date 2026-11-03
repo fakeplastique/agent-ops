@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="448" viewBox="0 0 1200 448" role="img" aria-labelledby="title desc">
+  <title id="title">Agent Ops: agents ask, humans sign off</title>
+  <desc id="desc">The Agent Ops logo beside the tagline, and a winding diagonal path from the top center to the bottom right through five stages: agent quorum, team lead, manager, org admin, signed decision.</desc>
+
+  <defs>
+    <linearGradient id="trail" x1="600" y1="28" x2="1136" y2="372" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#1b6c80"/>
+      <stop offset="0.25" stop-color="#1b6c80"/>
+      <stop offset="0.32" stop-color="#c9cdd1"/>
+      <stop offset="1" stop-color="#c9cdd1"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1200" height="448" rx="26" fill="#eef2f5"/>
+
+  <g id="path" transform="translate(0 28)">
+    <path d="M600.0 28.0 L606.1 33.2 L611.8 39.1 L617.2 45.4 L622.5 51.9 L627.8 58.4 L633.0 65.0 L638.4 71.4 L643.9 77.5 L649.6 83.3 L655.6 88.7 L662.0 93.6 L668.6 97.9 L675.7 101.7 L683.1 104.9 L690.8 107.6 L698.9 109.7 L707.3 111.3 L716.0 112.5 L724.9 113.4 L734.0 114.0 L743.2 114.5 L752.3 114.9 L761.5 115.4 L770.5 116.1 L779.3 117.1 L787.9 118.4 L796.2 120.3 L804.1 122.7 L811.6 125.8 L818.7 129.5 L825.3 133.9 L831.4 139.1 L837.2 144.9 L842.5 151.4 L847.4 158.5 L851.9 166.1 L856.2 174.2 L860.3 182.6 L864.2 191.2 L868.0 200.0 L871.8 208.8 L875.7 217.4 L879.8 225.8 L884.1 233.9 L888.6 241.5 L893.5 248.6 L898.8 255.1 L904.6 260.9 L910.7 266.1 L917.3 270.5 L924.4 274.2 L931.9 277.3 L939.8 279.7 L948.1 281.6 L956.7 282.9 L965.5 283.9 L974.5 284.6 L983.7 285.1 L992.8 285.5 L1002.0 286.0 L1011.1 286.6 L1020.0 287.5 L1028.7 288.7 L1037.1 290.3 L1045.2 292.4 L1052.9 295.1 L1060.3 298.3 L1067.4 302.1 L1074.0 306.4 L1080.4 311.3 L1086.4 316.7 L1092.1 322.5 L1097.6 328.6 L1103.0 335.0 L1108.2 341.6 L1113.5 348.1 L1118.8 354.6 L1124.2 360.9 L1129.9 366.8 L1136.0 372.0" fill="none" stroke="url(#trail)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="600.0" cy="28.0" r="9" fill="#1b6c80"/>
+    <circle cx="734.0" cy="114.0" r="9" fill="#eef2f5" stroke="#1b6c80" stroke-width="3"/>
+    <circle cx="868.0" cy="200.0" r="9" fill="#eef2f5" stroke="#c9cdd1" stroke-width="3"/>
+    <circle cx="1002.0" cy="286.0" r="9" fill="#eef2f5" stroke="#c9cdd1" stroke-width="3"/>
+    <circle cx="1136.0" cy="372.0" r="9" fill="#eef2f5" stroke="#c9cdd1" stroke-width="3" stroke-dasharray="4 3"/>
+  </g>
+
+  <g id="logo" transform="translate(64 142) scale(6)">
+    <g fill="#1b6c80">
+      <circle cx="4" cy="5" r="2.2"/><circle cx="4" cy="12" r="2.2"/><circle cx="4" cy="19" r="2.2"/><circle cx="19" cy="12" r="3.2"/>
+    </g>
+    <path d="M6 5l10 7M6 12h10M6 19l10-7" fill="none" stroke="#1b6c80" stroke-width="1.4"/>
+  </g>
+
+  <g id="headline" transform="translate(0 14)" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="68" font-weight="800" letter-spacing="-2" fill="#131416">
+    <text x="236" y="200">Agents ask.</text>
+    <text x="236" y="272">Humans sign off.</text>
+  </g>
+
+  <g id="labels" transform="translate(0 28)" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, 'DejaVu Sans Mono', monospace" font-size="20" fill="#5b5e62">
+    <text x="620" y="16">01 quorum</text>
+    <text x="754" y="102">02 team lead</text>
+    <text x="888" y="188">03 manager</text>
+    <text x="1022" y="274">04 org admin</text>
+    <text x="1136" y="408" text-anchor="end">05 signed decision</text>
+  </g>
+</svg>

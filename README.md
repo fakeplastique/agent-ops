@@ -1,18 +1,79 @@
-# Agent Ops
+<p align="center">
+  <img src="./assets/readme/hero.svg" width="100%" alt="Agent Ops: agents ask, humans sign off. A refund request waits at the team lead level after the agents' quorum approved it.">
+</p>
 
-A multi-tenant decision and approval hub for AI agents. Agents (Claude, ChatGPT, Copilot, custom) are external: before a consequential
-action they submit a **Decision Request** through an **MCP server** or the **REST API**. A quorum of independent agent sessions votes
-blind, then discusses. A unanimous low-risk request is auto-approved; anything else escalates to humans level by level (team lead,
-manager, org admin) with timeouts and an audit trail. On approval the agent gets a **signed receipt** anyone can verify.
+<p align="center">
+  <b>The audit-ready decision system for AI agents.</b><br />
+  Agents ask, a quorum votes, humans sign off, and the approval is cryptographically signed.
+</p>
 
-Three interfaces share one service layer: MCP (`/mcp`), REST (`/api/v1`) and the web app. Every row is tenant-isolated (Postgres
-row-level security); another tenant's id answers 404.
+<p align="center">
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#connect-an-mcp-client">Connect an agent</a> ·
+  <a href="docs/API.md">API</a> ·
+  <a href="docs/ARCHITECTURE.md">Architecture</a>
+</p>
 
-| Doc | What it holds |
+**Agent Ops is an audit-ready decision system for AI agents, with cryptographic approval.** Before an agent spends money, sends email or
+changes data, it asks. Other agents and the right people weigh in, every step lands in an audit trail, and an approval ends in an
+**HMAC-signed decision** that anyone can verify and that stops verifying if the request is edited afterwards. It works with the agents you
+already use (Claude, ChatGPT, Copilot, your own); we don't build agents, we make them accountable.
+
+## See it work
+
+<p align="center">
+  <img src="./assets/readme/inbox.png" width="100%" alt="The approval inbox: two requests wait on the signed-in org admin, with a countdown, the request's progress and Approve and Reject buttons.">
+</p>
+
+<table>
+  <tr>
+    <td width="50%"><img src="./assets/readme/decision.png" alt="A request's votes: three agent sessions approved blind, now waiting for the team lead."></td>
+    <td width="50%"><img src="./assets/readme/receipt.png" alt="An auto-approved low-risk request with its signed decision and a Verify button."></td>
+  </tr>
+  <tr>
+    <td><sub><b>Votes, then people.</b> Agents vote blind; anything that is not low-risk and unanimous goes to humans.</sub></td>
+    <td><sub><b>A decision that proves itself.</b> Signed, verifiable by anyone, and broken by any later edit.</sub></td>
+  </tr>
+</table>
+
+## How it works
+
+1. **An agent asks.** It describes what it wants to do and why, through an MCP client or the REST API.
+2. **Other agents review.** Independent agent sessions vote blind, then see each other's reasoning and discuss.
+3. **Safe things go through.** If the risk is low and everyone agrees, it is approved automatically, with no one interrupted.
+4. **Everything else goes to people.** A team lead, then a manager, then an org admin, each with a deadline. If someone is away, it
+   moves up. Approvers can answer from the web app, the API or Telegram.
+5. **The agent gets a signed decision.** Cryptographic proof of approval that the system carrying out the action can verify. Change
+   anything after the fact and the signature stops verifying.
+
+## What you get
+
+- **Fewer interruptions.** Routine, low-risk requests clear themselves; people only see what needs judgment.
+- **Audit-ready by design.** Roles, separation of duties, escalation rules and an append-only audit trail for every request, plus a
+  cryptographically signed decision for every approval.
+- **Live visibility.** An approval inbox, request details with votes and discussion, attachments, search and analytics, updated in real time.
+- **Fits your stack.** An MCP server for agents, a REST API and webhooks for integrations, Telegram for approvals on the go.
+- **Safe for many companies at once.** Each organization's data is fully isolated; another company's request simply doesn't exist for you.
+- **Free and Pro plans** with usage limits and feature flags per organization.
+
+<p align="center">
+  <img src="./assets/readme/analytics.png" width="100%" alt="Analytics for the last 30 days: requests, auto-approval rate, and breakdowns by status and risk.">
+</p>
+
+## Try it
+
+The fastest way is the demo: two sample companies (Acme Retail on Pro, Birch Studio on Free), a user for every role, agents, and
+requests in every state. Follow [Quick start](#quick-start), open <http://localhost:3000> and choose "Sign in as".
+
+| Want to know | Read |
 |---|---|
-| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | layers, state machine, event flow, MCP flow (Mermaid) |
-| [`docs/API.md`](docs/API.md) | every REST route, errors, pagination, idempotency, MCP tools |
-| [`docs/REALTIME.md`](docs/REALTIME.md) | WebSocket, long-poll and adaptive polling, with a measured comparison |
+| How it is built | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md): layers, state machine, event flow |
+| How to integrate | [`docs/API.md`](docs/API.md): every REST route and MCP tool |
+| How live updates work | [`docs/REALTIME.md`](docs/REALTIME.md): WebSocket, long-poll and polling, measured |
+
+---
+
+*Technical setup follows: running it locally, connecting an agent, tests and configuration.*
 
 ## Quick start
 
@@ -120,17 +181,3 @@ Environment variables only; `.env.example` lists the dev defaults. Hosted runs (
 | `S3_ENDPOINT_URL`, `S3_PUBLIC_ENDPOINT_URL` | empty | S3-compatible endpoint (internal) and the host presigned URLs use |
 | `S3_BUCKET`, `S3_REGION` | empty | bucket and region for the `s3` adapter |
 | `S3_ACCESS_KEY`, `S3_SECRET_KEY` | empty | credentials for the `s3` adapter (optional dev store: `docker compose --profile storage up -d garage`, then `scripts/garage-init.sh`) |
-
-
-## Deploy
-
-A push to `main` runs the gate (`.github/workflows/ci.yml`); when it passes, `deploy.yml` runs `railway up` for the API, then the
-worker, then the web app. Migrations run as Railway's pre-deploy command of the API service with the owner role, so the database
-stays private; they are additive (expand, then contract) because an older build may still be running. Needs `RAILWAY_TOKEN` in the
-repository secrets.
-
-The worker is the API image started with `arq app.worker.settings.WorkerSettings` and is its own Railway service named `worker`.
-Creating that service is a one-time manual step: point it at `backend/Dockerfile` (`RAILWAY_DOCKERFILE_PATH`), set its start command,
-and give it `DATABASE_URL`, `WORKER_DATABASE_URL` (the `app_worker` login), `REDIS_URL`, `RECEIPT_KEYS`, `WEBHOOK_SECRET_KEYS` and the
-Telegram variables. The API service also needs `APP_WORKER_PASSWORD` so its pre-deploy migration sets the login. The deploy
-workflow skips the worker step until the repository variable `DEPLOY_WORKER` is `true`.
