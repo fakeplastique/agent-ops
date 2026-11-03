@@ -34,7 +34,9 @@ async def _wipe(owner) -> None:
             await c.execute(
                 text(f"delete from {t} where organization_id = any(:i)"), {"i": [FERNWOOD, BIRCH]}
             )
-        await c.execute(text("delete from organizations where id = any(:i)"), {"i": [FERNWOOD, BIRCH]})
+        await c.execute(
+            text("delete from organizations where id = any(:i)"), {"i": [FERNWOOD, BIRCH]}
+        )
         demo_users = "select id from users where email like '%.demo'"
         await c.execute(text(f"delete from web_sessions where user_id in ({demo_users})"))
         await c.execute(text("delete from users where email like '%.demo'"))
@@ -186,7 +188,10 @@ async def test_demo_users_endpoint_404_when_DEMO_MODE_false(seeded, web, monkeyp
     monkeypatch.setattr(settings, "demo_mode", True)
     users = (await web.client.get("/api/v1/auth/demo/users")).json()["users"]
     assert {u["role"] for u in users} == ROLES
-    assert len(users) == 8 and {u["organization"] for u in users} == {"Fernwood Retail", "Birch Studio"}
+    assert len(users) == 8 and {u["organization"] for u in users} == {
+        "Fernwood Retail",
+        "Birch Studio",
+    }
 
     # a cross-site page cannot sign a visitor in; an unknown email is the same 404 as demo-off
     evil = await web.post(
