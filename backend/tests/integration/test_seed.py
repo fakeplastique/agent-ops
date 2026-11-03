@@ -11,7 +11,7 @@ pytestmark = pytest.mark.anyio
 
 # Far past every other test's clock: seeded deadlines never fall due in a sweep that is not ours.
 CLOCK = FakeClock(utc(2200, 1, 1))
-ACME, BIRCH = (demo.org_id(o.slug) for o in demo.ORGS)
+FERNWOOD, BIRCH = (demo.org_id(o.slug) for o in demo.ORGS)
 COUNTED = (
     "memberships", "teams", "agent_identities", "agent_tokens", "escalation_policies",
     "decision_requests", "votes", "approval_steps", "webhook_subscriptions", "audit_logs",
@@ -32,9 +32,9 @@ async def _wipe(owner) -> None:
         )
         for t in tables.all():
             await c.execute(
-                text(f"delete from {t} where organization_id = any(:i)"), {"i": [ACME, BIRCH]}
+                text(f"delete from {t} where organization_id = any(:i)"), {"i": [FERNWOOD, BIRCH]}
             )
-        await c.execute(text("delete from organizations where id = any(:i)"), {"i": [ACME, BIRCH]})
+        await c.execute(text("delete from organizations where id = any(:i)"), {"i": [FERNWOOD, BIRCH]})
         demo_users = "select id from users where email like '%.demo'"
         await c.execute(text(f"delete from web_sessions where user_id in ({demo_users})"))
         await c.execute(text("delete from users where email like '%.demo'"))
@@ -52,7 +52,7 @@ async def _one(owner, sql: str, **params):
 
 
 async def _counts(owner) -> dict[str, int]:
-    both = [ACME, BIRCH]
+    both = [FERNWOOD, BIRCH]
     out = {
         t: await _one(owner, f"select count(*) from {t} where organization_id = any(:i)", i=both)
         for t in COUNTED
@@ -78,17 +78,17 @@ async def test_seed_is_idempotent_and_reaches_every_status(seeded, app_engine, o
     # catches: a status nobody reaches (the Pro policy has two rounds, so it shows all seven)
     status_sql = "select distinct status from decision_requests where organization_id = :o"
     every = {s.value for s in Status}
-    assert await _column(owner_engine, status_sql, o=ACME) == every
+    assert await _column(owner_engine, status_sql, o=FERNWOOD) == every
     assert await _column(owner_engine, status_sql, o=BIRCH) == every - {"pending_discussion"}
     plans = dict(
         await fetch(
             owner_engine,
             "select id, plan_key from organizations where id = any(:i)",
-            i=[ACME, BIRCH],
+            i=[FERNWOOD, BIRCH],
         )
     )
-    assert plans == {ACME: "pro", BIRCH: "free"}
-    for org in (ACME, BIRCH):
+    assert plans == {FERNWOOD: "pro", BIRCH: "free"}
+    for org in (FERNWOOD, BIRCH):
         roles = await _column(
             owner_engine, "select role from memberships where organization_id = :o", o=org
         )
@@ -97,7 +97,7 @@ async def test_seed_is_idempotent_and_reaches_every_status(seeded, app_engine, o
 
 async def test_seed_uses_services_so_audit_outbox_and_receipts_exist(seeded, owner_engine):
     # catches: a raw-SQL seed producing states the engine cannot produce (no trail, no event, no receipt)
-    for org in (ACME, BIRCH):
+    for org in (FERNWOOD, BIRCH):
         n = await _one(
             owner_engine, "select count(*) from decision_requests where organization_id = :o", o=org
         )
@@ -156,7 +156,7 @@ async def test_seeded_org_a_data_invisible_to_org_b_users(seeded, app_engine, we
             "webhook_subscriptions",
         ):
             foreign = await s.scalar(
-                text(f"select count(*) from {t} where organization_id = :a"), {"a": ACME}
+                text(f"select count(*) from {t} where organization_id = :a"), {"a": FERNWOOD}
             )
             assert foreign == 0, t
     # over HTTP: a signed-in org B user lists only org B's requests and cannot open org A's
@@ -165,13 +165,13 @@ async def test_seeded_org_a_data_invisible_to_org_b_users(seeded, app_engine, we
     assert login.json()["organization_id"] == str(BIRCH)
     listed = (await web.client.get("/api/v1/decision-requests?limit=100")).json()["items"]
     assert listed
-    async with tenant_session(app_engine, ACME) as s:
-        acme_ids = {
+    async with tenant_session(app_engine, FERNWOOD) as s:
+        fernwood_ids = {
             str(i) for i in (await s.scalars(text("select id from decision_requests"))).all()
         }
-    assert not acme_ids & {d["id"] for d in listed}
+    assert not fernwood_ids & {d["id"] for d in listed}
     assert (
-        await web.client.get(f"/api/v1/decision-requests/{next(iter(acme_ids))}")
+        await web.client.get(f"/api/v1/decision-requests/{next(iter(fernwood_ids))}")
     ).status_code == 404
 
 
@@ -179,36 +179,36 @@ async def test_demo_users_endpoint_404_when_DEMO_MODE_false(seeded, web, monkeyp
     # catches: demo login shipped to production
     monkeypatch.setattr(settings, "demo_mode", False)
     assert (await web.client.get("/api/v1/auth/demo/users")).status_code == 404
-    off = await web.post("/api/v1/auth/demo/login", json={"email": "admin@acme.demo"})
+    off = await web.post("/api/v1/auth/demo/login", json={"email": "admin@fernwood.demo"})
     assert off.status_code == 404
     assert "set-cookie" not in off.headers
 
     monkeypatch.setattr(settings, "demo_mode", True)
     users = (await web.client.get("/api/v1/auth/demo/users")).json()["users"]
     assert {u["role"] for u in users} == ROLES
-    assert len(users) == 8 and {u["organization"] for u in users} == {"Acme Retail", "Birch Studio"}
+    assert len(users) == 8 and {u["organization"] for u in users} == {"Fernwood Retail", "Birch Studio"}
 
     # a cross-site page cannot sign a visitor in; an unknown email is the same 404 as demo-off
     evil = await web.post(
-        "/api/v1/auth/demo/login", origin="https://evil.test", json={"email": "admin@acme.demo"}
+        "/api/v1/auth/demo/login", origin="https://evil.test", json={"email": "admin@fernwood.demo"}
     )
     assert evil.status_code == 403
     assert (
-        await web.post("/api/v1/auth/demo/login", json={"email": "nobody@acme.demo"})
+        await web.post("/api/v1/auth/demo/login", json={"email": "nobody@fernwood.demo"})
     ).status_code == 404
-    ok = await web.post("/api/v1/auth/demo/login", json={"email": "lead@acme.demo"})
+    ok = await web.post("/api/v1/auth/demo/login", json={"email": "lead@fernwood.demo"})
     assert ok.status_code == 200 and ok.json()["role"] == "team_lead"
-    assert (await web.client.get("/api/v1/auth/session")).json()["organization_id"] == str(ACME)
+    assert (await web.client.get("/api/v1/auth/session")).json()["organization_id"] == str(FERNWOOD)
 
 
 async def test_demo_never_lists_or_signs_in_a_platform_admin(seeded, web, monkeypatch):
     # catches: demo login minting a session for an email that carries platform powers
     monkeypatch.setattr(settings, "demo_mode", True)
-    monkeypatch.setattr(settings, "platform_admin_emails", "admin@acme.demo")
+    monkeypatch.setattr(settings, "platform_admin_emails", "admin@fernwood.demo")
     emails = {u["email"] for u in (await web.client.get("/api/v1/auth/demo/users")).json()["users"]}
-    assert "admin@acme.demo" not in emails and "admin@birch.demo" in emails
+    assert "admin@fernwood.demo" not in emails and "admin@birch.demo" in emails
     assert (
-        await web.post("/api/v1/auth/demo/login", json={"email": "admin@acme.demo"})
+        await web.post("/api/v1/auth/demo/login", json={"email": "admin@fernwood.demo"})
     ).status_code == 404
 
 
@@ -224,17 +224,17 @@ async def test_reseed_converges_a_plan_left_behind_by_an_interrupted_run(
     # catches: org created but never upgraded (a crash between the two steps), then every re-run failing
     async with owner_engine.begin() as c:
         await c.execute(
-            text("delete from escalation_policies where organization_id = :o"), {"o": ACME}
+            text("delete from escalation_policies where organization_id = :o"), {"o": FERNWOOD}
         )
         await c.execute(
-            text("update organizations set plan_key = 'free' where id = :o"), {"o": ACME}
+            text("update organizations set plan_key = 'free' where id = :o"), {"o": FERNWOOD}
         )
     again = await demo.seed(app_engine, CLOCK, KEYS)
     assert again.secrets == {}
-    plan = await _one(owner_engine, "select plan_key from organizations where id = :o", o=ACME)
+    plan = await _one(owner_engine, "select plan_key from organizations where id = :o", o=FERNWOOD)
     assert plan == "pro"
     sql = "select levels from escalation_policies where organization_id = :o"
-    assert len(await _one(owner_engine, sql, o=ACME)) == 3
+    assert len(await _one(owner_engine, sql, o=FERNWOOD)) == 3
 
 
 async def test_failed_demo_sign_in_keeps_the_previous_session_and_leaves_no_row(
@@ -242,17 +242,17 @@ async def test_failed_demo_sign_in_keeps_the_previous_session_and_leaves_no_row(
 ):
     # catches: a refused sign-in deleting the caller's session or leaving an orphan one
     monkeypatch.setattr(settings, "demo_mode", True)
-    ok = await web.post("/api/v1/auth/demo/login", json={"email": "lead@acme.demo"})
+    ok = await web.post("/api/v1/auth/demo/login", json={"email": "lead@fernwood.demo"})
     assert ok.status_code == 200
     async with owner_engine.begin() as c:
         await c.execute(
             text(
                 "delete from memberships"
-                " where user_id = (select id from users where email = 'member@acme.demo')"
+                " where user_id = (select id from users where email = 'member@fernwood.demo')"
             )
         )
     before = await _one(owner_engine, "select count(*) from web_sessions")
-    refused = await web.post("/api/v1/auth/demo/login", json={"email": "member@acme.demo"})
+    refused = await web.post("/api/v1/auth/demo/login", json={"email": "member@fernwood.demo"})
     assert refused.status_code == 404
     assert await _one(owner_engine, "select count(*) from web_sessions") == before
     assert (await web.client.get("/api/v1/auth/session")).status_code == 200  # still the lead
@@ -265,5 +265,5 @@ async def test_demo_roster_is_rate_limited_and_the_email_bounded(seeded, web, mo
     codes = [(await web.client.get("/api/v1/auth/demo/users")).status_code for _ in range(3)]
     assert codes == [200, 200, 429]
     monkeypatch.setattr(settings, "write_limit_per_principal", 60)
-    long = await web.post("/api/v1/auth/demo/login", json={"email": "a" * 300 + "@acme.demo"})
+    long = await web.post("/api/v1/auth/demo/login", json={"email": "a" * 300 + "@fernwood.demo"})
     assert long.status_code == 422

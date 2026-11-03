@@ -116,7 +116,7 @@ That is why the ladder is WebSocket first (cheapest, one open connection), long-
 switch rung without a gap.
 
 **Load check (API alone, no realtime).** 10 and then 50 clients each read `GET /api/v1/decision-requests?limit=20` back to back for
-30 s against the same single process, with the 9 seeded decisions of Acme Retail:
+30 s against the same single process, with the 9 seeded decisions of Fernwood Retail:
 
 | Clients | Requests/s | p50 | p95 | p99 | max | Errors | API CPU (of one core) |
 |---|---|---|---|---|---|---|---|

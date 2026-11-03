@@ -62,12 +62,12 @@ class DemoOrg:
 
 ORGS = (
     DemoOrg(
-        "acme-retail", "Acme Retail", "pro",
+        "fernwood-retail", "Fernwood Retail", "pro",
         (
-            DemoUser("admin@acme.demo", "Ada Okafor", "org_admin"),
-            DemoUser("manager@acme.demo", "Marcus Lind", "manager"),
-            DemoUser("lead@acme.demo", "Tess Varga", "team_lead", "Support"),
-            DemoUser("member@acme.demo", "Mia Chen", "member", "Support"),
+            DemoUser("admin@fernwood.demo", "Ada Okafor", "org_admin"),
+            DemoUser("manager@fernwood.demo", "Marcus Lind", "manager"),
+            DemoUser("lead@fernwood.demo", "Tess Varga", "team_lead", "Support"),
+            DemoUser("member@fernwood.demo", "Mia Chen", "member", "Support"),
         ),
         (("Operations", None), ("Support", "Operations")),
         3, 2,

@@ -114,8 +114,8 @@ test("signing out and in as someone from another organization leaves nothing of 
   await agents.voteAll(req);
   await signInAs(page, PEOPLE.manager);
   await page.getByRole("button", { name: new RegExp(req.title) }).click();
-  await page.getByLabel(/Comment/).fill("draft typed by the Acme manager");
-  await leaveTraces(page, "acme");
+  await page.getByLabel(/Comment/).fill("draft typed by the Fernwood manager");
+  await leaveTraces(page, "fernwood");
 
   await openMenu(page, info.project.name === "narrow-375");
   await page.getByRole("button", { name: "Sign out" }).first().click();
@@ -147,7 +147,7 @@ test("switching organization reloads into the other one with the open request an
 
   await openMenu(page, info.project.name === "narrow-375");
   const reloaded = page.waitForEvent("load");
-  await page.getByRole("combobox", { name: "Organization" }).selectOption({ label: "Acme Retail" });
+  await page.getByRole("combobox", { name: "Organization" }).selectOption({ label: "Fernwood Retail" });
   await reloaded;
   await expect(page.getByRole("button", { name: new RegExp(req.title) })).toBeVisible();
   expect(await traces(page)).toMatchObject({ local: {}, session: {}, cache: null });

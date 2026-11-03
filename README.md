@@ -62,7 +62,7 @@ already use (Claude, ChatGPT, Copilot, your own); we don't build agents, we make
 
 ## Try it
 
-The fastest way is the demo: two sample companies (Acme Retail on Pro, Birch Studio on Free), a user for every role, agents, and
+The fastest way is the demo: two sample companies (Fernwood Retail on Pro, Birch Studio on Free), a user for every role, agents, and
 requests in every state. Follow [Quick start](#quick-start), open <http://localhost:3000> and choose "Sign in as".
 
 | Want to know | Read |
@@ -90,7 +90,7 @@ uv sync --project backend
 pnpm --dir frontend install
 MIGRATE_DATABASE_URL=postgresql://app:app@localhost:5432/agent_ops APP_WORKER_PASSWORD=app_worker scripts/migrate.sh
 
-# 3. Demo data: two organizations (Acme Retail on Pro, Birch Studio on Free), one user per role, agents, requests in every status.
+# 3. Demo data: two organizations (Fernwood Retail on Pro, Birch Studio on Free), one user per role, agents, requests in every status.
 #    The agent tokens and webhook secrets it prints are shown once.
 uv run --project backend python scripts/seed.py
 

@@ -12,7 +12,7 @@ export const PEOPLE = {
   birchManager: "Mina Ortiz",
 } as const;
 export const EMAILS = {
-  acmeAdmin: "admin@acme.demo",
+  fernwoodAdmin: "admin@fernwood.demo",
   birchAdmin: "admin@birch.demo",
 } as const;
 
@@ -59,7 +59,7 @@ async function asAgent(token: string, path: string, method: string, body?: unkno
 
 export type RequestSpec = { title: string; description?: string; payload?: Json; risk?: "low" | "medium" | "high" };
 
-/** The seeded Acme agents: Refund Bot asks, three reviewers vote. */
+/** The seeded Fernwood agents: Refund Bot asks, three reviewers vote. */
 export function agentsFor(opened: string[]) {
   const t = tokens();
   const create = async (s: RequestSpec): Promise<Created> => {
