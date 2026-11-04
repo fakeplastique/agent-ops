@@ -24,11 +24,16 @@ describe("next.config rewrites", () => {
     expect(rules).toContainEqual({ source: "/readyz", destination: "http://api.test:8000/readyz" });
   });
 
+  it("serves the API's Swagger UI at /docs for the landing page link", async () => {
+    const rules = await rewritesFor("http://api.test:8000");
+    expect(rules).toContainEqual({ source: "/docs", destination: "http://api.test:8000/docs" });
+  });
+
   it("forwards nothing that is not the API (no open proxy)", async () => {
     const rules = await rewritesFor("http://api.test:8000");
     for (const r of rules) {
       expect(r.destination.startsWith("http://api.test:8000/")).toBe(true);
-      expect(["/readyz", "/api/:path*"]).toContain(r.source);
+      expect(["/readyz", "/docs", "/api/:path*"]).toContain(r.source);
     }
   });
 });

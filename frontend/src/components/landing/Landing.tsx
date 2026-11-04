@@ -7,9 +7,10 @@ import { Converge, Rail } from "./Pics";
 import { ReceiptDemo } from "./ReceiptDemo";
 import type { Receipt } from "./receipt";
 
-// Demo, API docs and MCP endpoint links are placeholders until S3 gives URLs.
-const DEMO = "#cta";
-const SOON = "#top";
+// The demo sign-in lives on /login; /docs is the API's Swagger UI, proxied by next.config.ts.
+const DEMO = "/login";
+const DOCS = "/docs";
+const REPO_DOCS = "https://github.com/fakeplastique/agent-ops/blob/main/docs/API.md";
 
 const NAV = [
   ["How it works", "#how"],
@@ -278,10 +279,10 @@ function Cta() {
           <h2 id="cta-h">Let agents ask first.</h2>
           <p>Open the demo as a team lead, a manager or an org admin. No Google account needed.</p>
           <div className="ln-row">
-            <a className="ln-btn ln-light" href={SOON}>
+            <a className="ln-btn ln-light" href={DEMO}>
               Open the demo
             </a>
-            <a className="ln-link" href={SOON}>
+            <a className="ln-link" href={DOCS}>
               Read the API docs
             </a>
           </div>
@@ -330,9 +331,9 @@ function Footer() {
           <div>
             <h3>Developers</h3>
             <ul>
-              <li><a href={SOON}>API docs</a></li>
-              <li><a href={SOON}>MCP endpoint</a></li>
-              <li><a href={SOON}>Webhooks</a></li>
+              <li><a href={DOCS}>API docs</a></li>
+              <li><a href={`${REPO_DOCS}#mcp-tools`}>MCP endpoint</a></li>
+              <li><a href={`${REPO_DOCS}#webhooks`}>Webhooks</a></li>
             </ul>
           </div>
           <div>

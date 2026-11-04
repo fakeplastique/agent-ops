@@ -9,6 +9,7 @@ const config: NextConfig = {
   // all live on this origin, so the browser must never need the API's own host.
   rewrites: async () => [
     { source: "/readyz", destination: `${API_ORIGIN}/readyz` },
+    { source: "/docs", destination: `${API_ORIGIN}/docs` }, // Swagger UI; it loads /api/v1/openapi.json from this origin
     { source: "/api/:path*", destination: `${API_ORIGIN}/api/:path*` },
   ],
 };
