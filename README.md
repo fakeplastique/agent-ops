@@ -14,6 +14,13 @@
   <a href="docs/ARCHITECTURE.md">Architecture</a>
 </p>
 
+<p align="center">
+  <img src="https://img.shields.io/badge/FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white" alt="FastAPI">
+  <img src="https://img.shields.io/badge/PostgreSQL_16-4169E1?style=flat-square&logo=postgresql&logoColor=white" alt="PostgreSQL 16">
+  <img src="https://img.shields.io/badge/MCP-000000?style=flat-square&logo=modelcontextprotocol&logoColor=white" alt="Model Context Protocol">
+  <img src="https://img.shields.io/badge/Railway-0B0D0E?style=flat-square&logo=railway&logoColor=white" alt="Railway">
+</p>
+
 **Agent Ops is an audit-ready decision system for AI agents, with cryptographic approval.** Before an agent spends money, sends email or
 changes data, it asks. Other agents and the right people weigh in, every step lands in an audit trail, and an approval ends in an
 **HMAC-signed decision** that anyone can verify and that stops verifying if the request is edited afterwards. It works with the agents you
