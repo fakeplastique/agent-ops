@@ -9,7 +9,7 @@ ARG NEXT_PUBLIC_WS_ORIGIN
 ENV NEXT_PUBLIC_WS_ORIGIN=$NEXT_PUBLIC_WS_ORIGIN
 COPY package.json pnpm-lock.yaml ./
 RUN pnpm install --frozen-lockfile
-COPY next.config.ts tsconfig.json ./
+COPY next.config.ts tsconfig.json postcss.config.mjs ./
 COPY src ./src
 COPY public ./public
 RUN pnpm build && chown -R node:node /srv
