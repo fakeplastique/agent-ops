@@ -83,8 +83,10 @@ test("a second browser context decides and the first inbox updates without a rel
 });
 
 // Spec 8.1 Offline: losing the network pauses live updates visibly, and the banner clears when it returns.
+// Own user: /events allows 5 polls per user and org, and other journeys leave theirs open as the manager (a 429 keeps the banner up for its Retry-After).
 test("going offline shows the paused banner and coming back clears it", async ({ page, context }, info) => {
-  await signInAs(page, PEOPLE.manager);
+  test.setTimeout(90_000); // the 40 s wait below does not fit in the 30 s default
+  await signInAs(page, PEOPLE.birchManager);
   await expect(page.getByRole("heading", { level: 1, name: "Inbox" })).toBeVisible();
   await context.setOffline(true);
   await expect(page.getByText("Live updates paused, reconnecting")).toBeVisible({ timeout: 30_000 });
